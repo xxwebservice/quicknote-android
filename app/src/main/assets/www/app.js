@@ -18,11 +18,12 @@
   }
 
   // Helper: wrap NativeBridge.buildZipAndSave in a Promise
-  function nativeBuildZip(notesMd, claudeJson, audioFilename, zipFilename) {
+  // transcriptText is optional — included in ZIP when non-empty (Case A)
+  function nativeBuildZip(notesMd, claudeJson, audioFilename, transcriptText, zipFilename) {
     return new Promise((resolve, reject) => {
       const cb = 'qnZip' + Date.now();
       window[cb] = (size) => { delete window[cb]; size > 0 ? resolve(size) : reject(new Error('ZIP build failed')); };
-      NativeBridge.buildZipAndSave(notesMd, claudeJson, audioFilename || '', zipFilename, cb);
+      NativeBridge.buildZipAndSave(notesMd, claudeJson, audioFilename || '', transcriptText || '', zipFilename, cb);
     });
   }
 
@@ -33,6 +34,14 @@
   let timerInterval = null;
   let currentSession = null;
   let sessions = [];
+
+  // Transcription state
+  let selectedModelId      = null;
+  let transcriptionKey     = null; // poll key while service runs
+  let transcriptionPoll    = null; // setInterval handle
+  let progressTimer        = null; // setInterval for progress bar
+  let progressStartMs      = 0;
+  let progressEstimatedMs  = 120000;
 
   const dom = {
     statusDot:      $('#status-dot'),
@@ -67,6 +76,21 @@
     historyList:    $('#history-list'),
     backFromExports:$('#back-from-exports'),
     exportsList:    $('#exports-list'),
+    // Transcription
+    transcribeActionRow:   $('#transcribe-action-row'),
+    transcribeEntryBtn:    $('#transcribe-entry-btn'),
+    transcriptionScreen:   $('#transcription-screen'),
+    backFromTranscription: $('#back-from-transcription'),
+    whisperModelList:      $('#whisper-model-list'),
+    whisperLangSelect:     $('#whisper-lang-select'),
+    transcribeBtn:         $('#transcribe-btn'),
+    cancelTranscribeBtn:   $('#cancel-transcribe-btn'),
+    transcriptionProgressWrap: $('#transcription-progress-wrap'),
+    transcriptionProgressBar:  $('#transcription-progress-bar'),
+    transcriptionStatus:   $('#transcription-status'),
+    transcriptionResult:   $('#transcription-result'),
+    transcriptText:        $('#transcript-text'),
+    copyTranscriptBtn:     $('#copy-transcript-btn'),
   };
 
   // --- Utilities ---
@@ -100,7 +124,12 @@
   }
   function saveSessions() {
     localStorage.setItem('quicknote_sessions', JSON.stringify(
-      sessions.map(s => ({ id:s.id, title:s.title, startTime:s.startTime, duration:s.duration, notes:s.notes, hasAudio:s.hasAudio||false, nativeAudioFile:s.nativeAudioFile||null }))
+      sessions.map(s => ({
+        id:s.id, title:s.title, startTime:s.startTime, duration:s.duration,
+        notes:s.notes, hasAudio:s.hasAudio||false,
+        nativeAudioFile:s.nativeAudioFile||null,
+        transcription:s.transcription||null,
+      }))
     ));
   }
 
@@ -364,6 +393,15 @@
       e.innerHTML = `<span class="review-timestamp">${formatTimestamp(n.timestamp)}</span><span class="review-text">${escapeHtml(n.text)}</span>`;
       dom.reviewNotes.appendChild(e);
     });
+    // Show transcribe button only for native sessions with audio
+    if (dom.transcribeActionRow) {
+      const showTranscribe = isNative && !!session.nativeAudioFile;
+      dom.transcribeActionRow.classList.toggle('hidden', !showTranscribe);
+      if (showTranscribe && dom.transcribeEntryBtn) {
+        const label = session.transcription ? '重新转录' : '本地转录';
+        dom.transcribeEntryBtn.textContent = label;
+      }
+    }
     currentSession = session;
     showScreen('review-screen');
   }
@@ -414,7 +452,8 @@
 
     if (isNative) {
       // Java builds ZIP: streams audio from disk, no base64 overhead
-      const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', zipFilename);
+      // Pass transcript if available (Case A); empty string = skip (Case B)
+      const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', session.transcription || '', zipFilename);
       return { zipFilename, fileSize: size, native: true };
     }
 
@@ -598,6 +637,201 @@
     }
   }
 
+  // ── Transcription (local Whisper) ────────────────────────────────────────
+
+  function openTranscriptionScreen() {
+    if (!isNative || !currentSession) return;
+    selectedModelId = null;
+    dom.transcribeBtn.disabled = true;
+    dom.transcribeBtn.textContent = '开始转录';
+    dom.cancelTranscribeBtn.style.display = 'none';
+    dom.transcriptionProgressWrap.classList.add('hidden');
+    dom.transcriptionStatus.textContent = '';
+
+    // Restore existing transcript
+    if (currentSession.transcription) {
+      dom.transcriptionResult.classList.remove('hidden');
+      dom.transcriptText.textContent = currentSession.transcription;
+    } else {
+      dom.transcriptionResult.classList.add('hidden');
+    }
+
+    // Restore in-progress state (if user navigated away during transcription)
+    if (transcriptionKey) {
+      dom.transcriptionProgressWrap.classList.remove('hidden');
+      dom.cancelTranscribeBtn.style.display = '';
+      dom.transcribeBtn.textContent = '转录中...';
+    }
+
+    renderWhisperModels();
+    showScreen('transcription-screen');
+  }
+
+  function renderWhisperModels() {
+    if (!isNative) return;
+    let models;
+    try { models = JSON.parse(NativeBridge.getWhisperModels()); } catch { models = []; }
+    dom.whisperModelList.innerHTML = '';
+
+    models.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'model-card' + (selectedModelId === m.id ? ' selected' : '');
+      card.dataset.modelId = m.id;
+      card.innerHTML = `
+        <div class="model-card-header">
+          <span class="model-card-name">${escapeHtml(m.name)}</span>
+          <span class="model-badge ${m.downloaded ? 'downloaded' : ''}">${m.downloaded ? '✓ 已下载' : '未下载'}</span>
+        </div>
+        ${!m.downloaded ? `<button class="model-dl-btn" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>` : ''}
+        <div class="model-dl-progress hidden" id="dl-progress-${m.id}"></div>`;
+
+      if (m.downloaded) {
+        card.addEventListener('click', () => {
+          selectedModelId = m.id;
+          dom.transcribeBtn.disabled = !!transcriptionKey; // disable if already running
+          dom.whisperModelList.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+        });
+      }
+
+      const dlBtn = card.querySelector('.model-dl-btn');
+      if (dlBtn) {
+        dlBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          startModelDownload(m.id, card, dlBtn);
+        });
+      }
+      dom.whisperModelList.appendChild(card);
+    });
+  }
+
+  function startModelDownload(modelId, cardEl, dlBtn) {
+    dlBtn.disabled = true;
+    dlBtn.textContent = '下载中...';
+    const progressEl = cardEl.querySelector('.model-dl-progress');
+    progressEl.classList.remove('hidden');
+
+    const cb = 'qnDl' + Date.now();
+    window[cb] = function(data) {
+      if (data.type === 'progress') {
+        progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+      } else if (data.type === 'done') {
+        delete window[cb];
+        if (data.result === 'ok') {
+          progressEl.classList.add('hidden');
+          renderWhisperModels();
+          showToast('模型下载完成');
+        } else {
+          progressEl.textContent = '下载失败: ' + data.result;
+          dlBtn.disabled = false;
+          dlBtn.textContent = '重试下载';
+        }
+      }
+    };
+    NativeBridge.downloadWhisperModel(modelId, cb);
+  }
+
+  function startTranscription() {
+    if (!currentSession || !selectedModelId || transcriptionKey) return;
+    const audioFilename = currentSession.nativeAudioFile;
+    if (!audioFilename) { showToast('没有录音文件'); return; }
+
+    const key          = 'tr_' + Date.now();
+    const lang         = dom.whisperLangSelect.value;
+    const durationSecs = Math.floor((currentSession.duration || 0) / 1000);
+    const estimatedMs  = getTranscriptEstimatedMs(selectedModelId, durationSecs);
+
+    transcriptionKey = key;
+    dom.transcribeBtn.disabled = true;
+    dom.transcribeBtn.textContent = '转录中...';
+    dom.cancelTranscribeBtn.style.display = '';
+    dom.transcriptionProgressWrap.classList.remove('hidden');
+    dom.transcriptionResult.classList.add('hidden');
+
+    startProgressBar(estimatedMs);
+
+    NativeBridge.startTranscription(audioFilename, selectedModelId, lang, key, durationSecs);
+
+    // Poll for result every 3 seconds
+    transcriptionPoll = setInterval(pollTranscription, 3000);
+  }
+
+  function pollTranscription() {
+    if (!transcriptionKey || !isNative) return;
+    const result = NativeBridge.checkTranscriptionResult(transcriptionKey);
+    if (!result) return; // not ready yet
+
+    // Result arrived
+    clearInterval(transcriptionPoll);
+    transcriptionPoll = null;
+    stopProgressBar(true);
+    NativeBridge.clearTranscriptionResult(transcriptionKey);
+    transcriptionKey = null;
+
+    dom.cancelTranscribeBtn.style.display = 'none';
+    dom.transcribeBtn.disabled = false;
+    dom.transcribeBtn.textContent = '重新转录';
+
+    if (result.startsWith('error:')) {
+      dom.transcriptionStatus.textContent = '转录失败: ' + result.slice(7);
+      showToast('转录失败');
+    } else {
+      dom.transcriptionStatus.textContent = '转录完成 ✓';
+      dom.transcriptText.textContent = result;
+      dom.transcriptionResult.classList.remove('hidden');
+      if (currentSession) {
+        currentSession.transcription = result;
+        saveSessions();
+        // Update button label on review screen
+        if (dom.transcribeEntryBtn) dom.transcribeEntryBtn.textContent = '重新转录';
+      }
+    }
+  }
+
+  function cancelTranscription() {
+    if (!transcriptionKey) return;
+    clearInterval(transcriptionPoll);
+    transcriptionPoll = null;
+    NativeBridge.stopTranscription();
+    NativeBridge.clearTranscriptionResult(transcriptionKey);
+    transcriptionKey = null;
+    stopProgressBar(false);
+    dom.cancelTranscribeBtn.style.display = 'none';
+    dom.transcribeBtn.disabled = !selectedModelId;
+    dom.transcribeBtn.textContent = '开始转录';
+    dom.transcriptionStatus.textContent = '转录已取消';
+  }
+
+  function getTranscriptEstimatedMs(modelId, durationSecs) {
+    const factor = modelId === 'large-v3-turbo' ? 5 : modelId === 'small' ? 10 : 20;
+    return Math.max(10, Math.ceil(durationSecs / factor)) * 1000;
+  }
+
+  function startProgressBar(estimatedMs) {
+    clearInterval(progressTimer);
+    progressStartMs    = Date.now();
+    progressEstimatedMs = estimatedMs;
+    if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = '0%';
+    progressTimer = setInterval(() => {
+      const elapsed  = Date.now() - progressStartMs;
+      const pct      = Math.min(95, (elapsed / progressEstimatedMs) * 100);
+      const elapsedS = Math.floor(elapsed / 1000);
+      const remainS  = Math.max(0, Math.ceil((progressEstimatedMs - elapsed) / 1000));
+      if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = pct + '%';
+      if (dom.transcriptionStatus) {
+        dom.transcriptionStatus.textContent = remainS > 0
+          ? `转录中... 已用时 ${elapsedS}秒，约还需 ${remainS}秒`
+          : `转录中... 已用时 ${elapsedS}秒`;
+      }
+    }, 1000);
+  }
+
+  function stopProgressBar(success) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+    if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = success ? '100%' : '0%';
+  }
+
   // --- Download helper ---
   async function downloadBlob(blob, filename) {
     if (isNative) {
@@ -663,6 +897,30 @@
 
     dom.backBtn.addEventListener('click', () => { showScreen('start-screen'); renderSessionList(dom.sessionList, false); });
     dom.backFromExports.addEventListener('click', () => showScreen('start-screen'));
+
+    // Transcription screen
+    if (isNative) {
+      dom.transcribeEntryBtn?.addEventListener('click', openTranscriptionScreen);
+      dom.backFromTranscription?.addEventListener('click', () => {
+        if (transcriptionKey) showToast('转录在后台继续运行，完成后返回查看结果');
+        showScreen('review-screen');
+      });
+      dom.transcribeBtn?.addEventListener('click', startTranscription);
+      dom.cancelTranscribeBtn?.addEventListener('click', cancelTranscription);
+      dom.copyTranscriptBtn?.addEventListener('click', () => {
+        const text = dom.transcriptText?.textContent;
+        if (!text) return;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => showToast('已复制'));
+        }
+      });
+      // Resume polling if app was backgrounded during transcription
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && transcriptionKey && !transcriptionPoll) {
+          transcriptionPoll = setInterval(pollTranscription, 3000);
+        }
+      });
+    }
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && mediaRecorder?.state === 'recording') requestWakeLock();

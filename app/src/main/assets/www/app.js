@@ -51,11 +51,13 @@
     menuExport:     $('#menu-export'),
     menuHistory:    $('#menu-history'),
     menuExports:    $('#menu-exports'),
+    menuSettings:   $('#menu-settings'),
     startScreen:    $('#start-screen'),
     notesScreen:    $('#notes-screen'),
     reviewScreen:   $('#review-screen'),
     historyScreen:  $('#history-screen'),
     exportsScreen:  $('#exports-screen'),
+    settingsScreen: $('#settings-screen'),
     meetingTitle:   $('#meeting-title'),
     startBtn:       $('#start-btn'),
     sessionList:    $('#session-list'),
@@ -74,23 +76,28 @@
     newBtn:         $('#new-btn'),
     backBtn:        $('#back-btn'),
     historyList:    $('#history-list'),
-    backFromExports:$('#back-from-exports'),
-    exportsList:    $('#exports-list'),
+    backFromExports:  $('#back-from-exports'),
+    exportsList:      $('#exports-list'),
+    backFromSettings: $('#back-from-settings'),
+    settingsModelList: $('#settings-model-list'),
     // Transcription
-    transcribeActionRow:   $('#transcribe-action-row'),
-    transcribeEntryBtn:    $('#transcribe-entry-btn'),
-    transcriptionScreen:   $('#transcription-screen'),
-    backFromTranscription: $('#back-from-transcription'),
-    whisperModelList:      $('#whisper-model-list'),
-    whisperLangSelect:     $('#whisper-lang-select'),
-    transcribeBtn:         $('#transcribe-btn'),
-    cancelTranscribeBtn:   $('#cancel-transcribe-btn'),
-    transcriptionProgressWrap: $('#transcription-progress-wrap'),
-    transcriptionProgressBar:  $('#transcription-progress-bar'),
-    transcriptionStatus:   $('#transcription-status'),
-    transcriptionResult:   $('#transcription-result'),
-    transcriptText:        $('#transcript-text'),
-    copyTranscriptBtn:     $('#copy-transcript-btn'),
+    transcribeActionRow:      $('#transcribe-action-row'),
+    transcribeEntryBtn:       $('#transcribe-entry-btn'),
+    transcriptionScreen:      $('#transcription-screen'),
+    backFromTranscription:    $('#back-from-transcription'),
+    transcriptionNoModel:     $('#transcription-no-model'),
+    transcriptionHasModel:    $('#transcription-has-model'),
+    transcriptionModelSelect: $('#transcription-model-select'),
+    whisperLangSelect:        $('#whisper-lang-select'),
+    transcribeBtn:            $('#transcribe-btn'),
+    cancelTranscribeBtn:      $('#cancel-transcribe-btn'),
+    transcriptionProgressWrap:$('#transcription-progress-wrap'),
+    transcriptionProgressBar: $('#transcription-progress-bar'),
+    transcriptionStatus:      $('#transcription-status'),
+    transcriptionResult:      $('#transcription-result'),
+    transcriptText:           $('#transcript-text'),
+    copyTranscriptBtn:        $('#copy-transcript-btn'),
+    goToSettingsBtn:          $('#go-to-settings-btn'),
   };
 
   // --- Utilities ---
@@ -256,7 +263,6 @@
 
     if (isNative) {
       // ── Native path: Foreground Service records directly to disk ──────
-      // Survives screen lock, app switching, and app backgrounding.
       const audioFilename = id + '_recording.m4a';
       NativeBridge.startNativeRecording(audioFilename);
       currentSession.nativeAudioFile = audioFilename;
@@ -398,8 +404,7 @@
       const showTranscribe = isNative && !!session.nativeAudioFile;
       dom.transcribeActionRow.classList.toggle('hidden', !showTranscribe);
       if (showTranscribe && dom.transcribeEntryBtn) {
-        const label = session.transcription ? '重新转录' : '本地转录';
-        dom.transcribeEntryBtn.textContent = label;
+        dom.transcribeEntryBtn.textContent = session.transcription ? '重新转录' : '本地转录';
       }
     }
     currentSession = session;
@@ -483,7 +488,6 @@
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
-        // ZIP already written to disk by Java
         await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
         showToast('已保存: ' + result.zipFilename);
       } else {
@@ -588,7 +592,6 @@
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
           if (data.nativeFile) {
-            // File is on disk — share directly
             NativeBridge.shareFile(data.filename);
             return;
           }
@@ -612,7 +615,7 @@
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
           if (data.nativeFile) {
-            NativeBridge.shareFile(data.filename); // share = share sheet on native
+            NativeBridge.shareFile(data.filename);
             return;
           }
           await downloadBlob(data.blob, data.filename);
@@ -637,11 +640,82 @@
     }
   }
 
+  // ── Settings Screen (model management) ──────────────────────────────────
+
+  function openSettingsScreen() {
+    renderSettingsModels();
+    showScreen('settings-screen');
+  }
+
+  function renderSettingsModels() {
+    if (!isNative) return;
+    const container = $('#settings-model-list');
+    if (!container) return;
+    let models;
+    try { models = JSON.parse(NativeBridge.getWhisperModels()); } catch { models = []; }
+    container.innerHTML = '';
+
+    models.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'model-card';
+      card.dataset.modelId = m.id;
+      card.innerHTML = `
+        <div class="model-card-header">
+          <span class="model-card-name">${escapeHtml(m.name)}</span>
+          <span class="model-badge ${m.downloaded ? 'downloaded' : ''}">${m.downloaded ? '✓ 已下载' : '未下载'}</span>
+        </div>
+        <div class="model-action-row">
+          ${m.downloaded
+            ? `<button class="model-del-btn" data-action="delete" data-mid="${m.id}">删除模型</button>`
+            : `<button class="model-dl-btn" data-action="download" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>`
+          }
+        </div>
+        <div class="model-dl-progress" id="dl-progress-${m.id}"></div>`;
+      container.appendChild(card);
+    });
+
+    // Event delegation — one listener handles all download/delete clicks
+    container.addEventListener('click', function handleModelClick(e) {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const mid    = btn.dataset.mid;
+      if (action === 'download') {
+        btn.disabled = true;
+        btn.textContent = '下载中...';
+        const progressEl = document.getElementById('dl-progress-' + mid);
+        const cb = 'qnDl' + Date.now();
+        window[cb] = function(data) {
+          if (data.type === 'progress') {
+            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+          } else if (data.type === 'done') {
+            delete window[cb];
+            if (data.result === 'ok') {
+              showToast('模型下载完成');
+              renderSettingsModels();
+            } else {
+              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
+              btn.disabled = false;
+              btn.textContent = '重试下载';
+            }
+          }
+        };
+        NativeBridge.downloadWhisperModel(mid, cb);
+      } else if (action === 'delete') {
+        if (!confirm('确定删除此模型？需要时可重新下载。')) return;
+        NativeBridge.deleteWhisperModel(mid);
+        showToast('模型已删除');
+        renderSettingsModels();
+      }
+    }, { once: false });
+  }
+
   // ── Transcription (local Whisper) ────────────────────────────────────────
 
   function openTranscriptionScreen() {
     if (!isNative || !currentSession) return;
-    selectedModelId = null;
+
+    // Reset UI
     dom.transcribeBtn.disabled = true;
     dom.transcribeBtn.textContent = '开始转录';
     dom.cancelTranscribeBtn.style.display = 'none';
@@ -663,72 +737,45 @@
       dom.transcribeBtn.textContent = '转录中...';
     }
 
-    renderWhisperModels();
+    populateModelSelect();
     showScreen('transcription-screen');
   }
 
-  function renderWhisperModels() {
+  function populateModelSelect() {
     if (!isNative) return;
     let models;
     try { models = JSON.parse(NativeBridge.getWhisperModels()); } catch { models = []; }
-    dom.whisperModelList.innerHTML = '';
+    const downloaded = models.filter(m => m.downloaded);
 
-    models.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'model-card' + (selectedModelId === m.id ? ' selected' : '');
-      card.dataset.modelId = m.id;
-      card.innerHTML = `
-        <div class="model-card-header">
-          <span class="model-card-name">${escapeHtml(m.name)}</span>
-          <span class="model-badge ${m.downloaded ? 'downloaded' : ''}">${m.downloaded ? '✓ 已下载' : '未下载'}</span>
-        </div>
-        ${!m.downloaded ? `<button class="model-dl-btn" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>` : ''}
-        <div class="model-dl-progress hidden" id="dl-progress-${m.id}"></div>`;
+    if (!downloaded.length) {
+      dom.transcriptionNoModel.classList.remove('hidden');
+      dom.transcriptionHasModel.classList.add('hidden');
+      selectedModelId = null;
+      dom.transcribeBtn.disabled = true;
+      return;
+    }
 
-      if (m.downloaded) {
-        card.addEventListener('click', () => {
-          selectedModelId = m.id;
-          dom.transcribeBtn.disabled = !!transcriptionKey; // disable if already running
-          dom.whisperModelList.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
-          card.classList.add('selected');
-        });
-      }
+    dom.transcriptionNoModel.classList.add('hidden');
+    dom.transcriptionHasModel.classList.remove('hidden');
 
-      const dlBtn = card.querySelector('.model-dl-btn');
-      if (dlBtn) {
-        dlBtn.addEventListener('click', e => {
-          e.stopPropagation();
-          startModelDownload(m.id, card, dlBtn);
-        });
-      }
-      dom.whisperModelList.appendChild(card);
+    // Fill select
+    dom.transcriptionModelSelect.innerHTML = '';
+    downloaded.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name;
+      dom.transcriptionModelSelect.appendChild(opt);
     });
-  }
 
-  function startModelDownload(modelId, cardEl, dlBtn) {
-    dlBtn.disabled = true;
-    dlBtn.textContent = '下载中...';
-    const progressEl = cardEl.querySelector('.model-dl-progress');
-    progressEl.classList.remove('hidden');
+    // Restore previously selected model if still available
+    if (selectedModelId && downloaded.some(m => m.id === selectedModelId)) {
+      dom.transcriptionModelSelect.value = selectedModelId;
+    } else {
+      selectedModelId = downloaded[0].id;
+      dom.transcriptionModelSelect.value = selectedModelId;
+    }
 
-    const cb = 'qnDl' + Date.now();
-    window[cb] = function(data) {
-      if (data.type === 'progress') {
-        progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
-      } else if (data.type === 'done') {
-        delete window[cb];
-        if (data.result === 'ok') {
-          progressEl.classList.add('hidden');
-          renderWhisperModels();
-          showToast('模型下载完成');
-        } else {
-          progressEl.textContent = '下载失败: ' + data.result;
-          dlBtn.disabled = false;
-          dlBtn.textContent = '重试下载';
-        }
-      }
-    };
-    NativeBridge.downloadWhisperModel(modelId, cb);
+    dom.transcribeBtn.disabled = !!transcriptionKey;
   }
 
   function startTranscription() {
@@ -782,7 +829,6 @@
       if (currentSession) {
         currentSession.transcription = result;
         saveSessions();
-        // Update button label on review screen
         if (dom.transcribeEntryBtn) dom.transcribeEntryBtn.textContent = '重新转录';
       }
     }
@@ -894,9 +940,11 @@
     dom.menuExport.addEventListener('click', () => { if (currentSession) exportSession(); });
     dom.menuHistory.addEventListener('click', () => { renderSessionList(dom.historyList, true); showScreen('history-screen'); });
     dom.menuExports.addEventListener('click', () => { renderExportsList(); showScreen('exports-screen'); });
+    dom.menuSettings?.addEventListener('click', openSettingsScreen);
 
     dom.backBtn.addEventListener('click', () => { showScreen('start-screen'); renderSessionList(dom.sessionList, false); });
     dom.backFromExports.addEventListener('click', () => showScreen('start-screen'));
+    dom.backFromSettings?.addEventListener('click', () => showScreen('start-screen'));
 
     // Transcription screen
     if (isNative) {
@@ -913,6 +961,11 @@
         if (navigator.clipboard) {
           navigator.clipboard.writeText(text).then(() => showToast('已复制'));
         }
+      });
+      dom.goToSettingsBtn?.addEventListener('click', openSettingsScreen);
+      dom.transcriptionModelSelect?.addEventListener('change', () => {
+        selectedModelId = dom.transcriptionModelSelect.value;
+        dom.transcribeBtn.disabled = !!transcriptionKey;
       });
       // Resume polling if app was backgrounded during transcription
       document.addEventListener('visibilitychange', () => {

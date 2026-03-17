@@ -6,6 +6,17 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
+  // --- Native Android bridge ---
+  const isNative = typeof window.NativeBridge !== 'undefined';
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
   // --- State ---
   let mediaRecorder = null;
   let audioChunks = [];
@@ -356,7 +367,7 @@
     for (const {nb,crc,sz,off:fo} of cd) {
       parts.push(cat([new Uint8Array([0x50,0x4B,0x01,0x02]),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(sz),u32(sz),u16(nb.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(fo),nb]));
     }
-    const cdSz=parts.slice(files.length).reduce((s,a)=>s+a.length,0);
+    const cdSz=parts.slice(files.length * 2).reduce((s,a)=>s+a.length,0);
     parts.push(cat([new Uint8Array([0x50,0x4B,0x05,0x06]),u16(0),u16(0),u16(files.length),u16(files.length),u32(cdSz),u32(cdStart),u16(0)]));
     return cat(parts);
   }
@@ -403,10 +414,9 @@
     try {
       const { blob, filename, fileCount } = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
-      // Save to exports store
       await saveExport(currentSession, blob, filename);
-      downloadBlob(blob, filename);
-      showToast(`已导出 ${fileCount} 个文件`);
+      await downloadBlob(blob, filename);
+      if (!isNative) showToast(`已导出 ${fileCount} 个文件`);
     } catch(e) {
       document.querySelector('.toast')?.remove();
       showToast('导出失败: ' + e.message);
@@ -423,15 +433,19 @@
       document.querySelector('.toast')?.remove();
       await saveExport(currentSession, blob, filename);
 
+      if (isNative) {
+        const b64 = await blobToBase64(blob);
+        NativeBridge.saveFile(filename, b64);
+        NativeBridge.shareFile(filename);
+        return;
+      }
       if (navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type:'application/zip' })] })) {
         const file = new File([blob], filename, { type:'application/zip' });
         await navigator.share({ files: [file], title: currentSession.title || 'QuickNote', text: '会议记录' });
       } else if (navigator.share) {
-        // Share without file (fallback)
         await navigator.share({ title: currentSession.title || 'QuickNote', text: '会议记录已准备好，请使用导出功能下载。' });
       } else {
-        // No share API — just download
-        downloadBlob(blob, filename);
+        await downloadBlob(blob, filename);
         showToast(`已下载 (分享功能不支持此浏览器)`);
       }
     } catch(e) {
@@ -487,11 +501,17 @@
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
+          if (isNative) {
+            const b64 = await blobToBase64(data.blob);
+            NativeBridge.saveFile(data.filename, b64);
+            NativeBridge.shareFile(data.filename);
+            return;
+          }
           const file = new File([data.blob], data.filename, { type:'application/zip' });
           if (navigator.canShare && navigator.canShare({ files:[file] })) {
             await navigator.share({ files:[file], title: data.title });
           } else {
-            downloadBlob(data.blob, data.filename);
+            await downloadBlob(data.blob, data.filename);
             showToast('已下载（当前浏览器不支持文件分享）');
           }
         });
@@ -500,8 +520,8 @@
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
-          downloadBlob(data.blob, data.filename);
-          showToast('重新下载中...');
+          await downloadBlob(data.blob, data.filename);
+          if (!isNative) showToast('重新下载中...');
         });
 
         card.querySelector('.del-export-btn').addEventListener('click', async (e) => {
@@ -523,7 +543,12 @@
   }
 
   // --- Download helper ---
-  function downloadBlob(blob, filename) {
+  async function downloadBlob(blob, filename) {
+    if (isNative) {
+      const b64 = await blobToBase64(blob);
+      NativeBridge.saveFile(filename, b64);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;

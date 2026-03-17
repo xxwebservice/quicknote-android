@@ -365,7 +365,7 @@
     }
     const cdStart=off;
     for (const {nb,crc,sz,off:fo} of cd) {
-      parts.push(cat([new Uint8Array([0x50,0x4B,0x01,0x02]),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(sz),u32(sz),u16(nb.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(fo),nb]));
+      parts.push(cat([new Uint8Array([0x50,0x4B,0x01,0x02]),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(sz),u32(sz),u16(nb.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(fo),nb]));
     }
     const cdSz=parts.slice(files.length * 2).reduce((s,a)=>s+a.length,0);
     parts.push(cat([new Uint8Array([0x50,0x4B,0x05,0x06]),u16(0),u16(0),u16(files.length),u16(files.length),u32(cdSz),u32(cdStart),u16(0)]));

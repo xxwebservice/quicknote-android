@@ -22,6 +22,8 @@ import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -32,30 +34,24 @@ import java.util.zip.ZipOutputStream;
 public class MainActivity extends Activity {
 
     private WebView webView;
+    private WhisperBridge whisperBridge;
     private static final int MIC_PERMISSION_REQUEST = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Hide status bar for cleaner look
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(true);
         }
-
-        // Keep screen on during use
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        // Request mic permission upfront
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{
-                    Manifest.permission.RECORD_AUDIO
-                }, MIC_PERMISSION_REQUEST);
+                requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, MIC_PERMISSION_REQUEST);
             }
         }
 
-        // Setup WebView
         webView = new WebView(this);
         setContentView(webView);
 
@@ -67,10 +63,10 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
 
-        // JS bridge for native file saving
+        whisperBridge = new WhisperBridge(this);
+
         webView.addJavascriptInterface(new NativeBridge(), "NativeBridge");
 
-        // Handle mic permission in WebView
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
@@ -79,19 +75,21 @@ public class MainActivity extends Activity {
         });
 
         webView.setWebViewClient(new WebViewClient());
-
-        // Load app from assets
         webView.loadUrl("file:///android_asset/www/index.html");
     }
 
-    // Native bridge for file operations
     private class NativeBridge {
+
+        // ── Storage path ──────────────────────────────────────────────────
+
         @JavascriptInterface
         public String getStoragePath() {
             File dir = getExternalFilesDir("QuickNote");
             if (dir != null && !dir.exists()) dir.mkdirs();
             return dir != null ? dir.getAbsolutePath() : "";
         }
+
+        // ── File helpers ──────────────────────────────────────────────────
 
         @JavascriptInterface
         public boolean saveFile(String filename, String base64Data) {
@@ -132,7 +130,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        // ── Native Recording (Foreground Service) ──────────────────────────
+        // ── Native Recording (Foreground Service) ─────────────────────────
 
         @JavascriptInterface
         public void startNativeRecording(String filename) {
@@ -153,19 +151,19 @@ public class MainActivity extends Activity {
             startService(intent);
         }
 
-        // ── ZIP builder (streams audio from disk — no base64 overhead) ────
+        // ── ZIP builder ───────────────────────────────────────────────────
+        // transcriptText: pass session.transcription or '' — included if non-empty
 
         @JavascriptInterface
         public void buildZipAndSave(String notesMd, String claudeJson,
-                                     String audioFilename, String zipFilename,
-                                     String callbackFn) {
+                                     String audioFilename, String transcriptText,
+                                     String zipFilename, String callbackFn) {
             new Thread(() -> {
                 try {
                     File dir = getExternalFilesDir("QuickNote");
                     if (dir != null) dir.mkdirs();
                     File zipFile = new File(dir, zipFilename);
 
-                    // Derive prefix (strip "_quicknote.zip")
                     String prefix = zipFilename.endsWith("_quicknote.zip")
                             ? zipFilename.substring(0, zipFilename.length() - "_quicknote.zip".length())
                             : zipFilename.replace(".zip", "");
@@ -179,6 +177,13 @@ public class MainActivity extends Activity {
                     zos.putNextEntry(new ZipEntry(prefix + "_for_claude.json"));
                     zos.write(claudeJson.getBytes("UTF-8"));
                     zos.closeEntry();
+
+                    // Include local transcript when available (Case A)
+                    if (transcriptText != null && !transcriptText.isEmpty()) {
+                        zos.putNextEntry(new ZipEntry(prefix + "_transcript.txt"));
+                        zos.write(transcriptText.getBytes("UTF-8"));
+                        zos.closeEntry();
+                    }
 
                     if (audioFilename != null && !audioFilename.isEmpty()) {
                         File audioFile = new File(dir, audioFilename);
@@ -206,7 +211,7 @@ public class MainActivity extends Activity {
             }).start();
         }
 
-        // ── Share file ─────────────────────────────────────────────────────
+        // ── Share file ────────────────────────────────────────────────────
 
         @JavascriptInterface
         public boolean shareFile(String filename) {
@@ -235,6 +240,101 @@ public class MainActivity extends Activity {
                 e.printStackTrace();
                 return false;
             }
+        }
+
+        // ── Whisper model management ──────────────────────────────────────
+
+        @JavascriptInterface
+        public String getWhisperModels() {
+            return whisperBridge.getModelsJson();
+        }
+
+        @JavascriptInterface
+        public boolean isWhisperModelDownloaded(String modelId) {
+            return whisperBridge.isModelDownloaded(modelId);
+        }
+
+        @JavascriptInterface
+        public void downloadWhisperModel(String modelId, String callbackFn) {
+            new Thread(() -> {
+                String error = whisperBridge.downloadModel(modelId, (fileIdx, totalFiles, fileName) -> {
+                    try {
+                        JSONObject json = new JSONObject();
+                        json.put("type", "progress");
+                        json.put("file", fileIdx);
+                        json.put("total", totalFiles);
+                        json.put("name", fileName);
+                        String js = json.toString();
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                    } catch (Exception ignored) {}
+                });
+                try {
+                    JSONObject json = new JSONObject();
+                    json.put("type", "done");
+                    json.put("result", error == null ? "ok" : error);
+                    String js = json.toString();
+                    runOnUiThread(() -> webView.evaluateJavascript(
+                        "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                } catch (Exception ignored) {}
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void deleteWhisperModel(String modelId) {
+            whisperBridge.deleteModel(modelId);
+        }
+
+        // ── Transcription (Foreground Service) ────────────────────────────
+
+        @JavascriptInterface
+        public void startTranscription(String audioFilename, String modelId,
+                                        String language, String resultKey,
+                                        int durationSecs) {
+            Intent intent = new Intent(MainActivity.this, TranscriptionService.class);
+            intent.setAction(TranscriptionService.ACTION_START);
+            intent.putExtra(TranscriptionService.EXTRA_AUDIO, audioFilename);
+            intent.putExtra(TranscriptionService.EXTRA_MODEL, modelId);
+            intent.putExtra(TranscriptionService.EXTRA_LANG, language);
+            intent.putExtra(TranscriptionService.EXTRA_KEY, resultKey);
+            intent.putExtra(TranscriptionService.EXTRA_DURATION_SECS, durationSecs);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+        }
+
+        @JavascriptInterface
+        public void stopTranscription() {
+            Intent intent = new Intent(MainActivity.this, TranscriptionService.class);
+            intent.setAction(TranscriptionService.ACTION_STOP);
+            startService(intent);
+        }
+
+        /** Returns "" if not ready yet, transcript text when done, "error: ..." on failure */
+        @JavascriptInterface
+        public String checkTranscriptionResult(String resultKey) {
+            try {
+                File dir = new File(getExternalFilesDir("QuickNote"), "transcripts");
+                File f   = new File(dir, resultKey + ".txt");
+                if (!f.exists()) return "";
+                FileInputStream fis = new FileInputStream(f);
+                byte[] data = new byte[(int) f.length()];
+                fis.read(data);
+                fis.close();
+                return new String(data, "UTF-8");
+            } catch (Exception e) {
+                return "error: " + e.getMessage();
+            }
+        }
+
+        @JavascriptInterface
+        public void clearTranscriptionResult(String resultKey) {
+            try {
+                File dir = new File(getExternalFilesDir("QuickNote"), "transcripts");
+                new File(dir, resultKey + ".txt").delete();
+            } catch (Exception ignored) {}
         }
     }
 

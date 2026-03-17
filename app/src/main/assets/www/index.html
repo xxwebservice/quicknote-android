@@ -77,10 +77,13 @@
             <button id="export-btn" class="action-btn primary">导出 ZIP</button>
             <button id="share-btn" class="action-btn share">分享</button>
           </div>
+          <div class="review-actions hidden" id="transcribe-action-row" style="margin-top:10px">
+            <button id="transcribe-entry-btn" class="action-btn transcribe-btn">本地转录</button>
+          </div>
           <div class="review-actions" style="margin-top:10px">
             <button id="new-btn" class="action-btn">新建记录</button>
           </div>
-          <p class="export-hint">ZIP包含：录音 + 笔记 + Claude分析指引</p>
+          <p class="export-hint">ZIP包含：录音 + 笔记 + Claude分析指引（如已转录也包含transcript）</p>
         </div>
       </div>
 
@@ -103,6 +106,43 @@
         </div>
         <div class="list-screen-body">
           <div id="exports-list"></div>
+        </div>
+      </div>
+      <!-- Transcription -->
+      <div id="transcription-screen" class="screen">
+        <div class="list-screen-header">
+          <button id="back-from-transcription" class="icon-btn">←</button>
+          <h2>本地语音转录</h2>
+        </div>
+        <div class="list-screen-body">
+          <p class="section-title" style="margin-bottom:8px">选择模型</p>
+          <div id="whisper-model-list"></div>
+
+          <div style="margin-top:20px">
+            <p class="section-title" style="margin-bottom:8px">语言</p>
+            <select id="whisper-lang-select" class="whisper-lang-select">
+              <option value="">自动检测</option>
+              <option value="zh">中文 (zh)</option>
+              <option value="en">English (en)</option>
+              <option value="ja">日文 (ja)</option>
+            </select>
+          </div>
+
+          <button id="transcribe-btn" class="action-btn primary" style="margin-top:16px" disabled>开始转录</button>
+          <button id="cancel-transcribe-btn" class="action-btn" style="margin-top:8px;display:none">取消转录</button>
+
+          <div id="transcription-progress-wrap" class="progress-wrap hidden">
+            <div class="progress-bar-track"><div id="transcription-progress-bar" class="progress-bar-fill"></div></div>
+            <div id="transcription-status" class="transcription-status"></div>
+          </div>
+
+          <div id="transcription-result" class="transcription-result hidden">
+            <div class="result-header-row">
+              <span class="section-title">转录结果</span>
+              <button id="copy-transcript-btn" class="copy-btn">复制</button>
+            </div>
+            <div id="transcript-text" class="transcript-text"></div>
+          </div>
         </div>
       </div>
     </main>

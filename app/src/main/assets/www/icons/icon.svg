@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#3b82f6"/>
+  <g transform="translate(128, 96)">
+    <!-- Notepad icon -->
+    <rect x="0" y="0" width="256" height="320" rx="16" fill="white" opacity="0.95"/>
+    <line x1="48" y1="80" x2="208" y2="80" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
+    <line x1="48" y1="130" x2="180" y2="130" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
+    <line x1="48" y1="180" x2="196" y2="180" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
+    <line x1="48" y1="230" x2="160" y2="230" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>

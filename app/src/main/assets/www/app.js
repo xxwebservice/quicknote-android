@@ -17,8 +17,14 @@
     });
   }
 
-  // In-memory audio cache for native mode (bypasses IndexedDB Blob storage issues on WebView file:// origin)
-  const nativeAudioCache = new Map(); // sessionId -> { blob, type }
+  // Helper: wrap NativeBridge.buildZipAndSave in a Promise
+  function nativeBuildZip(notesMd, claudeJson, audioFilename, zipFilename) {
+    return new Promise((resolve, reject) => {
+      const cb = 'qnZip' + Date.now();
+      window[cb] = (size) => { delete window[cb]; size > 0 ? resolve(size) : reject(new Error('ZIP build failed')); };
+      NativeBridge.buildZipAndSave(notesMd, claudeJson, audioFilename || '', zipFilename, cb);
+    });
+  }
 
   // --- State ---
   let mediaRecorder = null;
@@ -94,7 +100,7 @@
   }
   function saveSessions() {
     localStorage.setItem('quicknote_sessions', JSON.stringify(
-      sessions.map(s => ({ id:s.id, title:s.title, startTime:s.startTime, duration:s.duration, notes:s.notes, hasAudio:s.hasAudio||false }))
+      sessions.map(s => ({ id:s.id, title:s.title, startTime:s.startTime, duration:s.duration, notes:s.notes, hasAudio:s.hasAudio||false, nativeAudioFile:s.nativeAudioFile||null }))
     ));
   }
 
@@ -216,36 +222,42 @@
       id,
       title: dom.meetingTitle.value.trim() || `会议 ${formatDate(Date.now())}`,
       startTime: Date.now(), duration: 0, notes: [], hasAudio: false,
+      nativeAudioFile: null,
     };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
-      });
-      let mimeType = '';
-      for (const mt of ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus']) {
-        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
-      }
-      audioChunks = [];
-      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        if (audioChunks.length) {
-          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-          // Native: keep blob in memory (IndexedDB Blob storage unreliable on file:// WebView)
-          if (isNative) {
-            nativeAudioCache.set(currentSession.id, { blob, type: blob.type });
-          } else {
-            await saveAudio(currentSession.id, blob);
-          }
-          currentSession.hasAudio = true;
+    if (isNative) {
+      // ── Native path: Foreground Service records directly to disk ──────
+      // Survives screen lock, app switching, and app backgrounding.
+      const audioFilename = id + '_recording.m4a';
+      NativeBridge.startNativeRecording(audioFilename);
+      currentSession.nativeAudioFile = audioFilename;
+      currentSession.hasAudio = true;
+    } else {
+      // ── Web path: MediaRecorder in JS ─────────────────────────────────
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
+        });
+        let mimeType = '';
+        for (const mt of ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus']) {
+          if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
         }
-        finishRecording();
-      };
-      mediaRecorder.start(1000);
-    } catch (err) {
-      console.warn('Mic denied, notes-only mode:', err);
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          if (audioChunks.length) {
+            const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            await saveAudio(currentSession.id, blob);
+            currentSession.hasAudio = true;
+          }
+          finishRecording();
+        };
+        mediaRecorder.start(1000);
+      } catch (err) {
+        console.warn('Mic denied, notes-only mode:', err);
+      }
     }
 
     recordingStartTime = Date.now();
@@ -275,8 +287,11 @@
     dom.timer.classList.add('hidden');
     dom.stopBtn.classList.add('hidden');
     releaseWakeLock();
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
+    if (isNative) {
+      NativeBridge.stopNativeRecording();
+      finishRecording();
+    } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop(); // onstop callback calls finishRecording
     } else {
       finishRecording();
     }
@@ -380,10 +395,10 @@
     return cat(parts);
   }
 
-  // --- Build ZIP blob for a session ---
+  // --- Build ZIP for a session ---
   async function buildSessionZip(session) {
-    const enc = new TextEncoder();
     const prefix = sanitizeFilename(session.title);
+    const zipFilename = `${prefix}_quicknote.zip`;
 
     let md = `# ${session.title||'未命名会议'}\n\n`;
     md += `- 日期: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
@@ -397,36 +412,45 @@
       instructions: ['1. 将录音转为完整transcript','2. 与笔记按时间戳对齐','3. 笔记是重点，transcript是上下文','输出: 会议纪要 + 重点标注 + 笔记未记但重要的内容']
     }, null, 2);
 
+    if (isNative) {
+      // Java builds ZIP: streams audio from disk, no base64 overhead
+      const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', zipFilename);
+      return { zipFilename, fileSize: size, native: true };
+    }
+
+    // Web path
+    const enc = new TextEncoder();
     const files = [
       { name: `${prefix}_notes.md`, data: enc.encode(md) },
       { name: `${prefix}_for_claude.json`, data: enc.encode(analysis) },
     ];
-
     try {
-      // Native: use in-memory cache; Web: use IndexedDB
-      const cached = isNative ? nativeAudioCache.get(session.id) : null;
-      const audioData = cached ? { blob: cached.blob, type: cached.type } : await getAudio(session.id);
+      const audioData = await getAudio(session.id);
       if (audioData && audioData.blob) {
         const buf = await audioData.blob.arrayBuffer();
         const ext = audioData.type.includes('mp4') ? 'm4a' : audioData.type.includes('webm') ? 'webm' : 'ogg';
         files.push({ name: `${prefix}_recording.${ext}`, data: new Uint8Array(buf) });
       }
     } catch(e) { console.warn('No audio:', e); }
-
     const zip = buildZip(files);
-    return { blob: new Blob([zip], { type:'application/zip' }), filename: `${prefix}_quicknote.zip`, fileCount: files.length };
+    return { blob: new Blob([zip], { type:'application/zip' }), zipFilename, fileCount: files.length };
   }
 
-  // --- Export (download) ---
+  // --- Export (save to device) ---
   async function exportSession() {
     if (!currentSession) return;
     showToast('正在打包...', 60000);
     try {
-      const { blob, filename, fileCount } = await buildSessionZip(currentSession);
+      const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
-      await saveExport(currentSession, blob, filename);
-      await downloadBlob(blob, filename);
-      if (!isNative) showToast(`已导出 ${fileCount} 个文件`);
+      if (result.native) {
+        // ZIP already written to disk by Java
+        await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
+        showToast('已保存: ' + result.zipFilename);
+      } else {
+        await saveExport(currentSession, result.blob, result.zipFilename);
+        await downloadBlob(result.blob, result.zipFilename);
+      }
     } catch(e) {
       document.querySelector('.toast')?.remove();
       showToast('导出失败: ' + e.message);
@@ -439,23 +463,23 @@
     if (!currentSession) return;
     showToast('正在打包...', 60000);
     try {
-      const { blob, filename, fileCount } = await buildSessionZip(currentSession);
+      const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
-      await saveExport(currentSession, blob, filename);
 
-      if (isNative) {
-        const b64 = await blobToBase64(blob);
-        NativeBridge.saveFile(filename, b64);
-        NativeBridge.shareFile(filename);
+      if (result.native) {
+        await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
+        NativeBridge.shareFile(result.zipFilename);
         return;
       }
-      if (navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type:'application/zip' })] })) {
-        const file = new File([blob], filename, { type:'application/zip' });
+
+      await saveExport(currentSession, result.blob, result.zipFilename);
+      if (navigator.canShare && navigator.canShare({ files: [new File([result.blob], result.zipFilename, { type:'application/zip' })] })) {
+        const file = new File([result.blob], result.zipFilename, { type:'application/zip' });
         await navigator.share({ files: [file], title: currentSession.title || 'QuickNote', text: '会议记录' });
       } else if (navigator.share) {
         await navigator.share({ title: currentSession.title || 'QuickNote', text: '会议记录已准备好，请使用导出功能下载。' });
       } else {
-        await downloadBlob(blob, filename);
+        await downloadBlob(result.blob, result.zipFilename);
         showToast(`已下载 (分享功能不支持此浏览器)`);
       }
     } catch(e) {
@@ -464,7 +488,20 @@
     }
   }
 
-  // --- Save export to IndexedDB ---
+  // --- Save export record (native: no blob, just filename reference) ---
+  async function saveExportRecord(session, filename, fileSize) {
+    try {
+      const db = await openExportsDB();
+      await idbPut(db, 'exports', {
+        id: generateId(), sessionId: session.id,
+        title: session.title || '未命名会议',
+        filename, blob: null, nativeFile: true,
+        exportedAt: Date.now(), fileSize: fileSize || 0,
+      });
+    } catch(e) { console.warn('Could not save export record:', e); }
+  }
+
+  // --- Save export to IndexedDB (web: stores blob) ---
   async function saveExport(session, blob, filename) {
     try {
       const db = await openExportsDB();
@@ -511,7 +548,12 @@
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
-          if (isNative) {
+          if (data.nativeFile) {
+            // File is on disk — share directly
+            NativeBridge.shareFile(data.filename);
+            return;
+          }
+          if (isNative && data.blob) {
             const b64 = await blobToBase64(data.blob);
             NativeBridge.saveFile(data.filename, b64);
             NativeBridge.shareFile(data.filename);
@@ -530,6 +572,10 @@
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
+          if (data.nativeFile) {
+            NativeBridge.shareFile(data.filename); // share = share sheet on native
+            return;
+          }
           await downloadBlob(data.blob, data.filename);
           if (!isNative) showToast('重新下载中...');
         });

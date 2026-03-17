@@ -2,6 +2,7 @@ package com.quicknote.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -18,6 +19,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+
+import androidx.core.content.FileProvider;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -121,6 +124,35 @@ public class MainActivity extends Activity {
                 );
                 return true;
             } catch (IOException e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean shareFile(String filename) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists()) {
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "文件不存在: " + filename, Toast.LENGTH_SHORT).show()
+                    );
+                    return false;
+                }
+                Uri contentUri = FileProvider.getUriForFile(
+                    MainActivity.this,
+                    "com.quicknote.app.fileprovider",
+                    file
+                );
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType("application/zip");
+                shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser = Intent.createChooser(shareIntent, "分享文件");
+                runOnUiThread(() -> startActivity(chooser));
+                return true;
+            } catch (Exception e) {
                 e.printStackTrace();
                 return false;
             }

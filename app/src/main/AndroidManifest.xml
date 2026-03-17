@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -32,6 +33,11 @@
         <service
             android:name=".RecordingService"
             android:foregroundServiceType="microphone"
+            android:exported="false" />
+
+        <service
+            android:name=".TranscriptionService"
+            android:foregroundServiceType="dataSync"
             android:exported="false" />
 
         <provider

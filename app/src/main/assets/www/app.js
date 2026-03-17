@@ -17,6 +17,9 @@
     });
   }
 
+  // In-memory audio cache for native mode (bypasses IndexedDB Blob storage issues on WebView file:// origin)
+  const nativeAudioCache = new Map(); // sessionId -> { blob, type }
+
   // --- State ---
   let mediaRecorder = null;
   let audioChunks = [];
@@ -229,8 +232,13 @@
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         if (audioChunks.length) {
-          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-          await saveAudio(currentSession.id, blob);
+          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+          // Native: keep blob in memory (IndexedDB Blob storage unreliable on file:// WebView)
+          if (isNative) {
+            nativeAudioCache.set(currentSession.id, { blob, type: blob.type });
+          } else {
+            await saveAudio(currentSession.id, blob);
+          }
           currentSession.hasAudio = true;
         }
         finishRecording();
@@ -395,7 +403,9 @@
     ];
 
     try {
-      const audioData = await getAudio(session.id);
+      // Native: use in-memory cache; Web: use IndexedDB
+      const cached = isNative ? nativeAudioCache.get(session.id) : null;
+      const audioData = cached ? { blob: cached.blob, type: cached.type } : await getAudio(session.id);
       if (audioData && audioData.blob) {
         const buf = await audioData.blob.arrayBuffer();
         const ext = audioData.type.includes('mp4') ? 'm4a' : audioData.type.includes('webm') ? 'webm' : 'ogg';

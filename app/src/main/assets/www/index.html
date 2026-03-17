@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>QuickNote</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header id="header">
+      <div class="header-left">
+        <span class="app-title">QuickNote</span>
+        <span id="status-dot" class="status-dot hidden"></span>
+      </div>
+      <div class="header-right">
+        <span id="timer" class="timer hidden">00:00</span>
+        <button id="menu-btn" class="icon-btn" aria-label="Menu">⋮</button>
+      </div>
+    </header>
+
+    <!-- Menu Dropdown -->
+    <div id="menu-dropdown" class="menu-dropdown hidden">
+      <button id="menu-export" class="menu-item">导出笔记</button>
+      <button id="menu-history" class="menu-item">历史记录</button>
+      <button id="menu-settings" class="menu-item">设置</button>
+    </div>
+
+    <!-- Main Content -->
+    <main id="main-content">
+      <!-- Start Screen -->
+      <div id="start-screen" class="screen active">
+        <div class="start-container">
+          <input type="text" id="meeting-title" class="meeting-title-input" placeholder="会议主题（可选）" autocomplete="off">
+          <button id="start-btn" class="start-btn">开始记录</button>
+          <p class="hint-text">点击开始后可同时录音和记笔记</p>
+        </div>
+        <!-- Recent Sessions -->
+        <div id="recent-sessions" class="recent-sessions">
+          <h3 class="section-title">最近记录</h3>
+          <div id="session-list" class="session-list"></div>
+        </div>
+      </div>
+
+      <!-- Recording/Notes Screen -->
+      <div id="notes-screen" class="screen">
+        <div id="title-bar" class="title-bar">
+          <span id="current-title" class="current-title"></span>
+        </div>
+        <div id="notes-container" class="notes-container">
+          <div id="notes-entries" class="notes-entries"></div>
+          <div class="input-row">
+            <textarea id="note-input" class="note-input" placeholder="输入笔记..." rows="1"></textarea>
+          </div>
+        </div>
+        <div class="bottom-bar">
+          <button id="stop-btn" class="stop-btn">完成</button>
+        </div>
+      </div>
+
+      <!-- Review Screen -->
+      <div id="review-screen" class="screen">
+        <div class="review-container">
+          <h2 id="review-title" class="review-title"></h2>
+          <div class="review-meta">
+            <span id="review-duration"></span>
+            <span id="review-count"></span>
+          </div>
+          <div id="review-notes" class="review-notes"></div>
+          <div class="review-actions">
+            <button id="export-btn" class="action-btn primary">导出材料</button>
+            <button id="new-btn" class="action-btn">新建记录</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- History Screen -->
+      <div id="history-screen" class="screen">
+        <div class="history-container">
+          <div class="history-header">
+            <button id="back-btn" class="icon-btn">←</button>
+            <h2>历史记录</h2>
+          </div>
+          <div id="history-list" class="session-list"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

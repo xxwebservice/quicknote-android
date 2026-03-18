@@ -113,30 +113,21 @@ header {
   flex-shrink: 0;
   transition: border-color 0.3s ease;
 }
-header.recording {
-  border-bottom-color: var(--recording-red);
-}
+/* header.recording: intentionally no visual change */
 
 .header-left { display: flex; align-items: center; gap: var(--space-2); }
 .app-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .header-right { display: flex; align-items: center; gap: 10px; }
 
-/* Status dot with pulse */
+/* Status dot — discreet, blends with UI */
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--recording-red);
-}
-.status-dot:not(.hidden) {
-  animation: recording-pulse 1.5s ease-in-out infinite;
+  background: var(--text-muted);
+  opacity: 0.5;
 }
 .status-dot.hidden { display: none; }
-
-@keyframes recording-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.4; transform: scale(0.8); }
-}
 
 .timer {
   font-size: 13px;
@@ -271,44 +262,21 @@ header.recording {
   font-size: 15px;
 }
 
-/* Record FAB */
-.record-fab {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: var(--recording-red);
+/* Start button — subtle, looks like a normal productivity app */
+.start-btn {
+  padding: 14px 48px;
+  background: var(--accent);
+  color: white;
   border: none;
-  box-shadow: var(--md-sys-elevation-2);
-  position: relative;
+  border-radius: var(--md-sys-shape-extra-large);
+  font-size: 16px;
+  font-weight: 500;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  -webkit-tap-highlight-color: transparent;
+  min-height: 48px;
+  transition: transform 0.1s ease, opacity 0.15s ease;
   touch-action: manipulation;
 }
-.record-fab:active {
-  transform: scale(0.92);
-  box-shadow: var(--md-sys-elevation-1);
-}
-.record-fab-inner {
-  display: block;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.95);
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  transition: border-radius 0.3s ease, width 0.3s ease, height 0.3s ease;
-}
-
-.start-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  letter-spacing: 0.02em;
-  margin-top: -8px;
-}
+.start-btn:active { transform: scale(0.96); opacity: 0.85; }
 .hint-text {
   font-size: 13px;
   color: var(--text-muted);
@@ -451,56 +419,9 @@ header.recording {
   overscroll-behavior: contain;
 }
 
-/* === Recording Bar (Notes Screen) === */
-.recording-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  background: var(--md-sys-color-tertiary-container);
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
-  flex-shrink: 0;
-  min-height: 36px;
-}
+/* === Recording Bar — intentionally minimal/invisible === */
+.recording-bar { display: none; }
 .recording-bar.hidden { display: none; }
-
-.rec-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.rec-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--recording-red);
-  animation: recording-pulse 1.5s ease-in-out infinite;
-}
-.rec-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--recording-red);
-  letter-spacing: 0.5px;
-}
-
-/* Mini waveform */
-.mini-waveform {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 20px;
-  flex: 1;
-  overflow: hidden;
-}
-.waveform-bar {
-  width: 3px;
-  border-radius: 1.5px;
-  background: var(--recording-red);
-  opacity: 0.5;
-  transition: height 0.15s ease;
-  min-height: 3px;
-}
 
 /* === Notes Screen === */
 .title-bar {

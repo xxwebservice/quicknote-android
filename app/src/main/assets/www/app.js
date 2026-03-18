@@ -748,8 +748,24 @@
           e.stopPropagation();
           const file = btn.dataset.file;
           if (!file || !isNative) return;
-          if (btn.dataset.action === 'edit') NativeBridge.openImageEditor(file);
-          else NativeBridge.openImageViewer(file);
+          if (btn.dataset.action === 'edit') {
+            // Open editor with callback to refresh the image on return
+            const cb = 'qnEdit' + Date.now();
+            window[cb] = function(result) {
+              delete window[cb];
+              if (result && result.dataUrl) {
+                // Update the image in the DOM
+                const img = entry.querySelector('img');
+                if (img) img.src = result.dataUrl;
+                // Update the note's cached dataUrl
+                note.imageDataUrl = result.dataUrl;
+                showToast('照片已更新');
+              }
+            };
+            NativeBridge.openImageEditor(file, cb);
+          } else {
+            NativeBridge.openImageViewer(file);
+          }
         });
       });
       // Tap image itself to view

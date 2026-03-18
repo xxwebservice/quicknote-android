@@ -472,12 +472,46 @@ header {
   line-height: 1.6;
   word-break: break-word;
   flex: 1;
+  white-space: pre-wrap;
+}
+.note-text strong { font-weight: 600; }
+.note-text .note-bullet { color: var(--accent); margin-right: 4px; }
+.note-text .note-heading { font-weight: 600; font-size: 16px; }
+.note-text .note-action { color: var(--md-sys-color-on-surface-variant); }
+.note-text .note-action::before { content: '☐ '; color: var(--accent); }
+.note-text .note-highlight { background: #FFF3CD; padding: 0 3px; border-radius: 2px; }
+
+/* Format toolbar */
+.format-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 6px var(--space-4) 0;
+  background: var(--bg);
+  flex-shrink: 0;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+.fmt-btn {
+  background: none;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-small);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 12px;
+  min-height: 32px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s ease;
+}
+.fmt-btn:active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--accent);
 }
 
 .input-row {
-  padding: 10px var(--space-4);
+  padding: 6px var(--space-4) 10px;
   padding-bottom: calc(10px + var(--safe-bottom));
-  border-top: 1px solid var(--md-sys-color-outline-variant);
   background: var(--bg);
   flex-shrink: 0;
 }

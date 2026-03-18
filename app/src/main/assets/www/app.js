@@ -1393,7 +1393,33 @@
     // Camera / Gallery buttons
     const cameraInput = $('#camera-input');
     const galleryInput = $('#gallery-input');
-    $('#camera-btn')?.addEventListener('click', () => { if (currentSession) cameraInput?.click(); });
+    $('#camera-btn')?.addEventListener('click', () => {
+      if (!currentSession) return;
+      if (isNative) {
+        const cb = 'qnCamera' + Date.now();
+        window[cb] = function(result) {
+          delete window[cb];
+          if (result && result.filename) {
+            const note = {
+              timestamp: Date.now() - recordingStartTime,
+              text: `![${result.filename}]`,
+              type: 'image',
+              imageFile: result.filename,
+              imageDataUrl: result.dataUrl,
+              createdAt: Date.now(),
+            };
+            currentSession.notes.push(note);
+            saveSessions();
+            dom.emptyHint.classList.add('hidden');
+            renderNoteEntry(note);
+            dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
+          }
+        };
+        NativeBridge.capturePhoto(cb);
+      } else {
+        cameraInput?.click();
+      }
+    });
     $('#gallery-btn')?.addEventListener('click', () => { if (currentSession) galleryInput?.click(); });
     cameraInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });
     galleryInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });

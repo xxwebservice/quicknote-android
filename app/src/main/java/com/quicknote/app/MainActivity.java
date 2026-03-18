@@ -27,12 +27,15 @@ import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 
+import android.content.ContentValues;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -212,6 +215,79 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(MainActivity.this, RecordingService.class);
             intent.setAction(RecordingService.ACTION_STOP);
             startService(intent);
+        }
+
+        // ── Image viewer / editor ─────────────────────────────────────
+
+        @JavascriptInterface
+        public void openImageViewer(String filename) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists()) return;
+                Uri contentUri = FileProvider.getUriForFile(
+                    MainActivity.this, "com.quicknote.app.fileprovider", file);
+                Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+                viewIntent.setDataAndType(contentUri, "image/jpeg");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                runOnUiThread(() -> startActivity(Intent.createChooser(viewIntent, "查看照片")));
+            } catch (Exception e) { e.printStackTrace(); }
+        }
+
+        @JavascriptInterface
+        public void openImageEditor(String filename) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists()) return;
+                Uri contentUri = FileProvider.getUriForFile(
+                    MainActivity.this, "com.quicknote.app.fileprovider", file);
+                Intent editIntent = new Intent(Intent.ACTION_EDIT);
+                editIntent.setDataAndType(contentUri, "image/jpeg");
+                editIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                runOnUiThread(() -> {
+                    try {
+                        startActivity(Intent.createChooser(editIntent, "编辑照片"));
+                    } catch (Exception e) {
+                        // No editor available, fall back to viewer
+                        Intent fallback = new Intent(Intent.ACTION_VIEW);
+                        fallback.setDataAndType(contentUri, "image/jpeg");
+                        fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(fallback);
+                    }
+                });
+            } catch (Exception e) { e.printStackTrace(); }
+        }
+
+        // ── Save image to system gallery ────────────────────────────────
+
+        private void saveToSystemGallery(File imageFile, String displayName) {
+            try {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME, displayName);
+                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/QuickNote");
+                    values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                }
+                Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri != null) {
+                    OutputStream os = getContentResolver().openOutputStream(uri);
+                    if (os != null) {
+                        FileInputStream fis = new FileInputStream(imageFile);
+                        byte[] buf = new byte[65536];
+                        int len;
+                        while ((len = fis.read(buf)) > 0) os.write(buf, 0, len);
+                        fis.close();
+                        os.close();
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        values.clear();
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                        getContentResolver().update(uri, values, null, null);
+                    }
+                }
+            } catch (Exception e) { e.printStackTrace(); }
         }
 
         // ── Camera capture ──────────────────────────────────────────────
@@ -558,44 +634,37 @@ public class MainActivity extends Activity {
                 // Process on background thread to avoid blocking UI
                 new Thread(() -> {
                     try {
-                        // Read the captured photo
+                        // Read the full-res captured photo
                         InputStream is = getContentResolver().openInputStream(cameraPhotoUri);
                         if (is == null) throw new IOException("Cannot open photo URI");
                         Bitmap original = BitmapFactory.decodeStream(is);
                         is.close();
                         if (original == null) throw new IOException("Failed to decode photo");
 
-                        // Compress and resize (max 1600px)
-                        int maxDim = 1600;
-                        int w = original.getWidth(), h = original.getHeight();
-                        if (w > maxDim || h > maxDim) {
-                            if (w > h) {
-                                h = h * maxDim / w;
-                                w = maxDim;
-                            } else {
-                                w = w * maxDim / h;
-                                h = maxDim;
-                            }
-                        }
-                        Bitmap scaled = Bitmap.createScaledBitmap(original, w, h, true);
-                        if (scaled != original) original.recycle();
-
-                        // Compress to JPEG
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos);
-                        scaled.recycle();
-                        byte[] jpegBytes = baos.toByteArray();
-
-                        // Save compressed version to QuickNote dir
+                        // Save FULL resolution to QuickNote dir (JPEG 95% — no blur)
                         String filename = "photo_" + System.currentTimeMillis() + ".jpg";
                         File dir = getExternalFilesDir("QuickNote");
                         File outFile = new File(dir, filename);
                         FileOutputStream fos = new FileOutputStream(outFile);
-                        fos.write(jpegBytes);
+                        original.compress(Bitmap.CompressFormat.JPEG, 95, fos);
                         fos.close();
 
-                        // Build base64 data URL
-                        String b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP);
+                        // Save to system gallery (Pictures/QuickNote)
+                        saveToSystemGallery(outFile, filename);
+
+                        // Make a THUMBNAIL for JS display (max 800px, lower quality for fast transfer)
+                        int maxThumb = 800;
+                        int tw = original.getWidth(), th = original.getHeight();
+                        if (tw > maxThumb || th > maxThumb) {
+                            if (tw > th) { th = th * maxThumb / tw; tw = maxThumb; }
+                            else { tw = tw * maxThumb / th; th = maxThumb; }
+                        }
+                        Bitmap thumb = Bitmap.createScaledBitmap(original, tw, th, true);
+                        original.recycle();
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        thumb.compress(Bitmap.CompressFormat.JPEG, 70, baos);
+                        thumb.recycle();
+                        String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
                         String dataUrl = "data:image/jpeg;base64," + b64;
 
                         // Callback to JS

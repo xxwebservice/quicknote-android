@@ -509,12 +509,28 @@
     dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
   }
 
+  /** Render note text with inline markdown formatting */
+  function renderFormattedText(raw) {
+    let html = escapeHtml(raw);
+    // **bold**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // ==highlight==
+    html = html.replace(/==(.+?)==/g, '<span class="note-highlight">$1</span>');
+    // Lines starting with "- " → bullet
+    html = html.replace(/^- (.+)$/gm, '<span class="note-bullet">•</span>$1');
+    // Lines starting with "[] " or "[ ] " → action item
+    html = html.replace(/^\[\s?\] (.+)$/gm, '<span class="note-action">$1</span>');
+    // Lines starting with "# " → heading
+    html = html.replace(/^# (.+)$/gm, '<span class="note-heading">$1</span>');
+    return html;
+  }
+
   function renderNoteEntry(note) {
     const entry = document.createElement('div');
     entry.className = 'note-entry';
     entry.innerHTML = `
       <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
-      <span class="note-text">${escapeHtml(note.text)}</span>`;
+      <span class="note-text">${renderFormattedText(note.text)}</span>`;
     let startX = 0, curX = 0;
     entry.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, { passive: true });
     entry.addEventListener('touchmove', e => {
@@ -1238,6 +1254,34 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(dom.noteInput.value); }
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
+
+    // Format toolbar
+    document.querySelector('.format-toolbar')?.addEventListener('click', e => {
+      const btn = e.target.closest('[data-fmt]');
+      if (!btn) return;
+      const ta = dom.noteInput;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const sel = ta.value.substring(start, end);
+      let insert = '';
+      switch (btn.dataset.fmt) {
+        case 'bullet':   insert = '- '; break;
+        case 'bold':     insert = sel ? `**${sel}**` : '**'; break;
+        case 'heading':  insert = '# '; break;
+        case 'action':   insert = '[] '; break;
+        case 'highlight':insert = sel ? `==${sel}==` : '=='; break;
+      }
+      if (sel && (btn.dataset.fmt === 'bold' || btn.dataset.fmt === 'highlight')) {
+        ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+        ta.selectionStart = ta.selectionEnd = start + insert.length;
+      } else {
+        ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+        ta.selectionStart = ta.selectionEnd = start + insert.length;
+      }
+      ta.focus();
+      dom.sendBtn.disabled = !ta.value.trim();
+      autoResize();
+    });
 
     // Stop recording
     dom.stopBtn.addEventListener('click', () => {

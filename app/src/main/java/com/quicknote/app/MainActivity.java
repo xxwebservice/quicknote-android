@@ -4,10 +4,13 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.View;
 import android.view.WindowManager;
@@ -24,10 +27,12 @@ import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -37,7 +42,10 @@ public class MainActivity extends Activity {
     private WhisperBridge whisperBridge;
     private static final int MIC_PERMISSION_REQUEST = 1001;
     private static final int FILE_CHOOSER_REQUEST = 1002;
+    private static final int CAMERA_CAPTURE_REQUEST = 1003;
     private ValueCallback<Uri[]> fileUploadCallback;
+    private String cameraCallbackFn;
+    private Uri cameraPhotoUri;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -204,6 +212,31 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(MainActivity.this, RecordingService.class);
             intent.setAction(RecordingService.ACTION_STOP);
             startService(intent);
+        }
+
+        // ── Camera capture ──────────────────────────────────────────────
+
+        @JavascriptInterface
+        public void capturePhoto(String callbackFn) {
+            cameraCallbackFn = callbackFn;
+            Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            // Create temp file for full-res photo
+            File dir = getExternalFilesDir("QuickNote");
+            if (dir != null && !dir.exists()) dir.mkdirs();
+            File photoFile = new File(dir, "photo_" + System.currentTimeMillis() + ".jpg");
+            cameraPhotoUri = FileProvider.getUriForFile(
+                MainActivity.this, "com.quicknote.app.fileprovider", photoFile);
+            takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri);
+            runOnUiThread(() -> {
+                try {
+                    startActivityForResult(takePictureIntent, CAMERA_CAPTURE_REQUEST);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    // Camera not available — notify JS
+                    webView.evaluateJavascript(
+                        "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](null)", null);
+                }
+            });
         }
 
         // ── ZIP builder ───────────────────────────────────────────────────
@@ -517,6 +550,75 @@ public class MainActivity extends Activity {
                 }
                 fileUploadCallback.onReceiveValue(results);
                 fileUploadCallback = null;
+            }
+        } else if (requestCode == CAMERA_CAPTURE_REQUEST) {
+            if (resultCode == RESULT_OK && cameraPhotoUri != null && cameraCallbackFn != null) {
+                final String cbFn = cameraCallbackFn;
+                cameraCallbackFn = null;
+                // Process on background thread to avoid blocking UI
+                new Thread(() -> {
+                    try {
+                        // Read the captured photo
+                        InputStream is = getContentResolver().openInputStream(cameraPhotoUri);
+                        if (is == null) throw new IOException("Cannot open photo URI");
+                        Bitmap original = BitmapFactory.decodeStream(is);
+                        is.close();
+                        if (original == null) throw new IOException("Failed to decode photo");
+
+                        // Compress and resize (max 1600px)
+                        int maxDim = 1600;
+                        int w = original.getWidth(), h = original.getHeight();
+                        if (w > maxDim || h > maxDim) {
+                            if (w > h) {
+                                h = h * maxDim / w;
+                                w = maxDim;
+                            } else {
+                                w = w * maxDim / h;
+                                h = maxDim;
+                            }
+                        }
+                        Bitmap scaled = Bitmap.createScaledBitmap(original, w, h, true);
+                        if (scaled != original) original.recycle();
+
+                        // Compress to JPEG
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos);
+                        scaled.recycle();
+                        byte[] jpegBytes = baos.toByteArray();
+
+                        // Save compressed version to QuickNote dir
+                        String filename = "photo_" + System.currentTimeMillis() + ".jpg";
+                        File dir = getExternalFilesDir("QuickNote");
+                        File outFile = new File(dir, filename);
+                        FileOutputStream fos = new FileOutputStream(outFile);
+                        fos.write(jpegBytes);
+                        fos.close();
+
+                        // Build base64 data URL
+                        String b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP);
+                        String dataUrl = "data:image/jpeg;base64," + b64;
+
+                        // Callback to JS
+                        JSONObject result = new JSONObject();
+                        result.put("filename", filename);
+                        result.put("dataUrl", dataUrl);
+                        String js = result.toString();
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "typeof window['" + cbFn + "']==='function'&&window['" + cbFn + "'](" + js + ")", null));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "typeof window['" + cbFn + "']==='function'&&window['" + cbFn + "'](null)", null));
+                    }
+                }).start();
+            } else {
+                // User cancelled or error
+                if (cameraCallbackFn != null) {
+                    final String cbFn = cameraCallbackFn;
+                    cameraCallbackFn = null;
+                    runOnUiThread(() -> webView.evaluateJavascript(
+                        "typeof window['" + cbFn + "']==='function'&&window['" + cbFn + "'](null)", null));
+                }
             }
         }
         super.onActivityResult(requestCode, resultCode, data);

@@ -1538,9 +1538,9 @@
     cameraInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });
     galleryInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });
 
-    // Stop recording
+    // Stop recording — always confirm to prevent accidental tap
     dom.stopBtn.addEventListener('click', () => {
-      if (currentSession && !currentSession.notes.length && !confirm('\u8FD8\u6CA1\u6709\u7B14\u8BB0\uFF0C\u786E\u5B9A\u7ED3\u675F\uFF1F')) return;
+      if (!confirm('确定结束记录？')) return;
       stopRecording();
     });
 
@@ -1779,6 +1779,58 @@
     });
     window.addEventListener('beforeunload', () => {
       if (currentSession && recordingStartTime) saveActiveSession();
+    });
+
+    // Backup button
+    $('#backup-btn')?.addEventListener('click', () => {
+      const data = {
+        sessions: JSON.parse(localStorage.getItem('quicknote_sessions') || '[]'),
+        settings: JSON.parse(localStorage.getItem('quicknote_settings') || '{}'),
+        version: '2.4',
+        exportedAt: new Date().toISOString(),
+      };
+      const json = JSON.stringify(data, null, 2);
+      if (isNative) {
+        NativeBridge.saveBackup(json);
+      } else {
+        const blob = new Blob([json], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'quicknote_backup.json';
+        a.click();
+      }
+      showToast('数据已备份');
+    });
+
+    // Restore button
+    $('#restore-btn')?.addEventListener('click', () => {
+      let json = '';
+      if (isNative) {
+        json = NativeBridge.loadBackup();
+      }
+      if (!json) { showToast('未找到备份文件'); return; }
+      try {
+        const data = JSON.parse(json);
+        if (!data.sessions) throw new Error('invalid backup');
+        if (!confirm(`发现备份 (${data.sessions.length}条记录, ${data.exportedAt || '未知时间'})。\n恢复将覆盖当前数据，确定？`)) return;
+        localStorage.setItem('quicknote_sessions', JSON.stringify(data.sessions));
+        if (data.settings) localStorage.setItem('quicknote_settings', JSON.stringify(data.settings));
+        loadSessions();
+        renderSessionList(dom.sessionList, false);
+        applySettingsToUI();
+        showToast(`已恢复 ${data.sessions.length} 条记录`);
+      } catch(e) { showToast('备份文件格式错误'); }
+    });
+
+    // Debug info button
+    $('#debug-info-btn')?.addEventListener('click', () => {
+      let info = '浏览器模式';
+      if (isNative) {
+        try { info = NativeBridge.getDebugInfo(); } catch(e) { info = 'error: ' + e; }
+      }
+      const el = $('#debug-info-display');
+      if (el) el.textContent = typeof info === 'string' && info.startsWith('{') ? JSON.stringify(JSON.parse(info), null, 1) : info;
+      showToast(info);
     });
 
     // Load initial settings

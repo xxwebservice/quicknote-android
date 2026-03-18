@@ -71,6 +71,11 @@
               <button class="fmt-btn" data-fmt="heading" title="标题">H</button>
               <button class="fmt-btn" data-fmt="action" title="待办">☐</button>
               <button class="fmt-btn" data-fmt="highlight" title="高亮">✦</button>
+              <span class="fmt-sep"></span>
+              <button class="fmt-btn" id="camera-btn" title="拍照">&#128247;</button>
+              <button class="fmt-btn" id="gallery-btn" title="图片">&#128444;</button>
+              <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none">
+              <input type="file" id="gallery-input" accept="image/*" style="display:none">
             </div>
             <div class="input-group">
               <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="2"></textarea>

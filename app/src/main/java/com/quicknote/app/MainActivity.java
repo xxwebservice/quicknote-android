@@ -46,8 +46,11 @@ public class MainActivity extends Activity {
     private static final int MIC_PERMISSION_REQUEST = 1001;
     private static final int FILE_CHOOSER_REQUEST = 1002;
     private static final int CAMERA_CAPTURE_REQUEST = 1003;
+    private static final int EDIT_IMAGE_REQUEST = 1004;
     private ValueCallback<Uri[]> fileUploadCallback;
     private String cameraCallbackFn;
+    private String editingImageFilename; // track which file is being edited
+    private String editingImageCallbackFn;
     private Uri cameraPhotoUri;
 
     @Override
@@ -235,11 +238,13 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void openImageEditor(String filename) {
+        public void openImageEditor(String filename, String callbackFn) {
             try {
                 File dir = getExternalFilesDir("QuickNote");
                 File file = new File(dir, filename);
                 if (!file.exists()) return;
+                editingImageFilename = filename;
+                editingImageCallbackFn = callbackFn != null ? callbackFn : "";
                 Uri contentUri = FileProvider.getUriForFile(
                     MainActivity.this, "com.quicknote.app.fileprovider", file);
                 Intent editIntent = new Intent(Intent.ACTION_EDIT);
@@ -247,9 +252,9 @@ public class MainActivity extends Activity {
                 editIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                 runOnUiThread(() -> {
                     try {
-                        startActivity(Intent.createChooser(editIntent, "编辑照片"));
+                        startActivityForResult(Intent.createChooser(editIntent, "编辑照片"), EDIT_IMAGE_REQUEST);
                     } catch (Exception e) {
-                        // No editor available, fall back to viewer
+                        // No editor — fall back to viewer
                         Intent fallback = new Intent(Intent.ACTION_VIEW);
                         fallback.setDataAndType(contentUri, "image/jpeg");
                         fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -257,6 +262,12 @@ public class MainActivity extends Activity {
                     }
                 });
             } catch (Exception e) { e.printStackTrace(); }
+        }
+
+        /** Overload for backward compat (no callback) */
+        @JavascriptInterface
+        public void openImageEditor(String filename) {
+            openImageEditor(filename, "");
         }
 
         // ── Camera capture ──────────────────────────────────────────────
@@ -713,6 +724,66 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> webView.evaluateJavascript(
                         "typeof window['" + cbFn + "']==='function'&&window['" + cbFn + "'](null)", null));
                 }
+            }
+        } else if (requestCode == EDIT_IMAGE_REQUEST) {
+            // Image editor returned — check if the edited image needs to be saved back
+            final String filename = editingImageFilename;
+            final String cbFn = editingImageCallbackFn;
+            editingImageFilename = null;
+            editingImageCallbackFn = null;
+
+            if (filename != null) {
+                new Thread(() -> {
+                    try {
+                        File dir = getExternalFilesDir("QuickNote");
+                        File originalFile = new File(dir, filename);
+
+                        // Case 1: Editor returned a new URI in data
+                        if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                            Uri editedUri = data.getData();
+                            InputStream is = getContentResolver().openInputStream(editedUri);
+                            if (is != null) {
+                                FileOutputStream fos = new FileOutputStream(originalFile);
+                                byte[] buf = new byte[65536];
+                                int len;
+                                while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
+                                is.close();
+                                fos.close();
+                                // Also update gallery copy
+                                saveToSystemGallery(originalFile, filename);
+                            }
+                        }
+                        // Case 2: Editor wrote back to our file in-place (some editors do this)
+                        // No action needed — file is already updated
+
+                        // Notify JS to refresh the image
+                        if (cbFn != null && !cbFn.isEmpty()) {
+                            // Build new thumbnail
+                            Bitmap bmp = BitmapFactory.decodeFile(originalFile.getAbsolutePath());
+                            if (bmp != null) {
+                                int maxThumb = 800;
+                                int tw = bmp.getWidth(), th = bmp.getHeight();
+                                if (tw > maxThumb || th > maxThumb) {
+                                    if (tw > th) { th = th * maxThumb / tw; tw = maxThumb; }
+                                    else { tw = tw * maxThumb / th; th = maxThumb; }
+                                }
+                                Bitmap thumb = Bitmap.createScaledBitmap(bmp, tw, th, true);
+                                bmp.recycle();
+                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                thumb.compress(Bitmap.CompressFormat.JPEG, 70, baos);
+                                thumb.recycle();
+                                String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                                String dataUrl = "data:image/jpeg;base64," + b64;
+                                JSONObject result = new JSONObject();
+                                result.put("filename", filename);
+                                result.put("dataUrl", dataUrl);
+                                String js = result.toString();
+                                runOnUiThread(() -> webView.evaluateJavascript(
+                                    "typeof window['" + cbFn + "']==='function'&&window['" + cbFn + "'](" + js + ")", null));
+                            }
+                        }
+                    } catch (Exception e) { e.printStackTrace(); }
+                }).start();
             }
         }
         super.onActivityResult(requestCode, resultCode, data);

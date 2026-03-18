@@ -130,8 +130,8 @@ header {
 }
 .list-screen-header h2 { font-size: 18px; font-weight: 600; }
 .list-screen-body {
-  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 16px 16px 24px;
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 16px 16px 40px;
 }
 
 /* === Notes Screen === */
@@ -168,7 +168,7 @@ header {
 .send-btn:not(:disabled):active { transform: scale(0.9); }
 
 /* === Review Screen === */
-.review-container { padding: 24px 16px; padding-bottom: calc(24px + var(--safe-bottom)); overflow-y: auto; flex: 1; }
+.review-container { padding: 24px 16px; padding-bottom: calc(40px + var(--safe-bottom)); overflow-y: auto; flex: 1; min-height: 0; }
 .review-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
 .review-meta { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; }
 .review-notes { margin-bottom: 24px; }
@@ -183,20 +183,21 @@ header {
 .action-btn:active { opacity: 0.8; }
 .export-hint { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 12px; }
 
-/* === Transcription Screen === */
+/* === Settings & Transcription Screens === */
 .transcribe-btn { background: #7c3aed; color: white; border-color: #7c3aed; }
+.settings-hint { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
 .whisper-lang-select {
   width: 100%; padding: 12px 14px; border: 1px solid var(--border);
   border-radius: var(--radius); font-size: 15px; background: var(--bg-secondary);
-  color: var(--text); outline: none;
+  color: var(--text); outline: none; -webkit-appearance: none; appearance: none;
 }
-.whisper-model-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* Model cards (settings) */
 .model-card {
   padding: 14px 16px; background: var(--bg-secondary);
-  border-radius: var(--radius); border: 2px solid transparent; cursor: pointer;
+  border-radius: var(--radius); margin-bottom: 8px;
 }
-.model-card.selected { border-color: var(--accent); }
-.model-card:active { background: var(--border); }
 .model-card-header { display: flex; justify-content: space-between; align-items: center; }
 .model-card-name { font-size: 15px; font-weight: 500; }
 .model-badge {
@@ -204,25 +205,33 @@ header {
   background: var(--border); color: var(--text-secondary);
 }
 .model-badge.downloaded { background: #d1fae5; color: #059669; }
-.model-dl-btn {
-  margin-top: 8px; padding: 8px 14px; background: var(--accent); color: white;
-  border: none; border-radius: 8px; font-size: 13px; cursor: pointer; width: 100%;
+.model-action-row { margin-top: 10px; }
+.model-dl-btn, .model-del-btn {
+  width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
+  font-size: 14px; font-weight: 500; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
-.model-dl-btn:active { opacity: 0.8; }
+.model-dl-btn  { background: var(--accent); color: white; }
+.model-del-btn { background: var(--bg); color: var(--danger); border: 1px solid var(--border); }
+.model-dl-btn:active  { opacity: 0.8; }
+.model-del-btn:active { background: var(--bg-secondary); }
 .model-dl-btn:disabled { background: var(--border); color: var(--text-muted); }
-.model-dl-progress { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
-.progress-wrap { margin-top: 16px; }
+.model-dl-progress { margin-top: 8px; font-size: 12px; color: var(--text-muted); min-height: 16px; }
+
+/* Transcription screen */
+.transcription-no-model { padding: 16px 0; color: var(--text-secondary); font-size: 15px; }
+.progress-wrap { }
 .progress-bar-track {
-  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+  height: 5px; background: var(--border); border-radius: 3px; overflow: hidden;
 }
 .progress-bar-fill {
-  height: 100%; width: 0%; background: var(--accent); border-radius: 2px;
+  height: 100%; width: 0%; background: var(--accent); border-radius: 3px;
   transition: width 1s linear;
 }
 .transcription-status { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
 .transcription-result {
-  margin-top: 20px; border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
 }
 .result-header-row {
   display: flex; justify-content: space-between; align-items: center;
@@ -230,14 +239,42 @@ header {
   background: var(--bg-secondary);
 }
 .copy-btn {
-  padding: 5px 12px; background: var(--accent); color: white;
+  padding: 6px 14px; background: var(--accent); color: white;
   border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .transcript-text {
   padding: 14px; font-size: 15px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
-  max-height: 320px; overflow-y: auto;
 }
+
+/* === Toggle switch (diarization) === */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+}
+.toggle-label { display: flex; flex-direction: column; gap: 2px; }
+.toggle-label span:first-child { font-size: 15px; color: var(--text); }
+.toggle-hint { font-size: 12px; color: var(--text-muted); }
+.toggle-checkbox {
+  width: 44px; height: 26px; -webkit-appearance: none; appearance: none;
+  background: var(--border); border-radius: 13px; position: relative;
+  transition: background 0.2s; cursor: pointer; flex-shrink: 0;
+  touch-action: manipulation;
+}
+.toggle-checkbox::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px; border-radius: 50%; background: white;
+  transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-checkbox:checked { background: var(--accent); }
+.toggle-checkbox:checked::after { transform: translateX(18px); }
+
+/* === Notes Fusion === */
+.merge-action-row { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.merge-btn { background: #10b981; color: white; border-color: #10b981; font-size: 14px; flex: 1; }
+.merge-share-btn { background: var(--accent); color: white; border-color: var(--accent); font-size: 14px; flex: 1; }
+.merge-btn:active, .merge-share-btn:active { opacity: 0.8; }
 
 /* === Utility === */
 .hidden { display: none !important; }

@@ -893,12 +893,21 @@
     const downloaded = dlState.bytesDownloaded || 0;
     const total = dlState.bytesTotal || 0;
     const speed = dlState.speed || '';
+    // ETA calculation
+    let eta = '';
+    if (dlState.speedBps > 0 && total > downloaded) {
+      const remainSecs = Math.ceil((total - downloaded) / dlState.speedBps);
+      if (remainSecs < 60) eta = `${remainSecs}秒`;
+      else if (remainSecs < 3600) eta = `${Math.ceil(remainSecs / 60)}分钟`;
+      else eta = `${Math.floor(remainSecs / 3600)}小时${Math.ceil((remainSecs % 3600) / 60)}分`;
+    }
+    const etaText = eta ? ` · 约${eta}` : '';
     return `
       <div class="model-progress-bar-track">
-        <div class="model-progress-bar-fill" style="width:${pct}%"></div>
+        <div class="model-progress-bar-fill" style="width:${pct.toFixed(1)}%"></div>
       </div>
       <div class="model-progress-info">
-        <span>${pct.toFixed(1)}% \u00B7 ${formatFileSize(downloaded)} / ${total > 0 ? formatFileSize(total) : '?'}</span>
+        <span>${pct.toFixed(1)}% · ${formatFileSize(downloaded)} / ${total > 0 ? formatFileSize(total) : '?'}${etaText}</span>
         <span class="model-progress-speed">${speed}</span>
       </div>`;
   }
@@ -1297,51 +1306,57 @@
         // Initialize download tracking
         downloadProgress[modelKey] = {
           active: true, percent: 0, bytesDownloaded: 0, bytesTotal: 0,
-          speed: '', startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+          speed: '', speedBps: 0, startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+          currentFile: 1, totalFiles: 3, fileBytesDownloaded: 0, fileBytesTotal: 0,
         };
         if (progressEl) progressEl.innerHTML = buildModelProgressHtml(downloadProgress[modelKey]);
 
         const cb = 'qnDl' + Date.now();
         window[cb] = function(data) {
+          const dlState = downloadProgress[modelKey];
           if (data.type === 'progress') {
-            const dlState = downloadProgress[modelKey];
+            // File-level: which file is being downloaded (1/3, 2/3, 3/3)
             if (dlState) {
-              // Calculate progress
-              const fileIdx = data.file || 1;
-              const totalFiles = data.total || 1;
-              const fileProgress = (data.progress !== undefined) ? data.progress : (fileIdx / totalFiles);
-              const overallPct = ((fileIdx - 1) / totalFiles + fileProgress / totalFiles) * 100;
-
-              // Calculate speed
+              dlState.currentFile = data.file || 1;
+              dlState.totalFiles = data.total || 1;
+              dlState.currentFileName = data.name || '';
+              // Reset byte tracking for each new file
+              dlState.fileBytesDownloaded = 0;
+              dlState.fileBytesTotal = 0;
+            }
+          } else if (data.type === 'bytes') {
+            // Byte-level: real-time download progress
+            if (dlState) {
+              dlState.fileBytesDownloaded = data.downloaded || 0;
+              dlState.fileBytesTotal = data.total > 0 ? data.total : 0;
+              // Overall progress: (completedFiles + currentFileProgress) / totalFiles
+              const filePct = dlState.fileBytesTotal > 0 ? dlState.fileBytesDownloaded / dlState.fileBytesTotal : 0;
+              const overallPct = ((dlState.currentFile - 1 + filePct) / dlState.totalFiles) * 100;
+              dlState.percent = Math.min(99, overallPct);
+              dlState.bytesDownloaded = dlState.fileBytesDownloaded;
+              dlState.bytesTotal = dlState.fileBytesTotal;
+              // Speed calculation (smoothed, update every 0.5s)
               const now = Date.now();
-              const bytesNow = data.bytesDownloaded || (overallPct / 100 * (data.totalBytes || 0));
               const elapsed = (now - dlState.lastTime) / 1000;
-              if (elapsed > 0.5) {
-                const speedBps = (bytesNow - dlState.lastBytes) / elapsed;
-                dlState.speed = speedBps > 0 ? formatFileSize(speedBps) + '/s' : '';
-                dlState.lastBytes = bytesNow;
+              if (elapsed >= 0.5) {
+                const speedBps = (dlState.fileBytesDownloaded - dlState.lastBytes) / elapsed;
+                dlState.speedBps = speedBps > 0 ? speedBps : (dlState.speedBps || 0);
+                dlState.speed = dlState.speedBps > 0 ? formatFileSize(dlState.speedBps) + '/s' : '';
+                dlState.lastBytes = dlState.fileBytesDownloaded;
                 dlState.lastTime = now;
               }
-
-              dlState.percent = Math.min(99, overallPct);
-              dlState.bytesDownloaded = data.bytesDownloaded || bytesNow;
-              dlState.bytesTotal = data.totalBytes || 0;
               updateModelDownloadProgress(modelKey, data);
-            }
-            // Also update text info
-            if (progressEl && !downloadProgress[modelKey]) {
-              progressEl.textContent = `\u6B63\u5728\u4E0B\u8F7D: ${data.name} (${data.file}/${data.total})`;
             }
           } else if (data.type === 'done') {
             delete window[cb];
             delete downloadProgress[modelKey];
             if (data.result === 'ok') {
-              showToast('\u6A21\u578B\u4E0B\u8F7D\u5B8C\u6210');
+              showToast('模型下载完成');
               renderSettingsModels();
             } else {
-              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">\u4E0B\u8F7D\u5931\u8D25: ${data.result}</span>`;
+              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">下载失败: ${data.result}</span>`;
               btn.disabled = false;
-              btn.textContent = '\u91CD\u8BD5\u4E0B\u8F7D';
+              btn.textContent = '重试下载';
             }
           }
         };
@@ -1361,48 +1376,51 @@
 
         downloadProgress[modelKey] = {
           active: true, percent: 0, bytesDownloaded: 0, bytesTotal: 0,
-          speed: '', startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+          speed: '', speedBps: 0, startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+          currentFile: 1, totalFiles: 2, fileBytesDownloaded: 0, fileBytesTotal: 0,
         };
         if (progressEl) progressEl.innerHTML = buildModelProgressHtml(downloadProgress[modelKey]);
 
         const cb = 'qnDl' + Date.now();
         window[cb] = function(data) {
+          const dlState = downloadProgress[modelKey];
           if (data.type === 'progress') {
-            const dlState = downloadProgress[modelKey];
             if (dlState) {
-              const fileIdx = data.file || 1;
-              const totalFiles = data.total || 1;
-              const fileProgress = (data.progress !== undefined) ? data.progress : (fileIdx / totalFiles);
-              const overallPct = ((fileIdx - 1) / totalFiles + fileProgress / totalFiles) * 100;
-
+              dlState.currentFile = data.file || 1;
+              dlState.totalFiles = data.total || 1;
+              dlState.fileBytesDownloaded = 0;
+              dlState.fileBytesTotal = 0;
+            }
+          } else if (data.type === 'bytes') {
+            if (dlState) {
+              dlState.fileBytesDownloaded = data.downloaded || 0;
+              dlState.fileBytesTotal = data.total > 0 ? data.total : 0;
+              const filePct = dlState.fileBytesTotal > 0 ? dlState.fileBytesDownloaded / dlState.fileBytesTotal : 0;
+              const overallPct = ((dlState.currentFile - 1 + filePct) / dlState.totalFiles) * 100;
+              dlState.percent = Math.min(99, overallPct);
+              dlState.bytesDownloaded = dlState.fileBytesDownloaded;
+              dlState.bytesTotal = dlState.fileBytesTotal;
               const now = Date.now();
-              const bytesNow = data.bytesDownloaded || (overallPct / 100 * (data.totalBytes || 0));
               const elapsed = (now - dlState.lastTime) / 1000;
-              if (elapsed > 0.5) {
-                const speedBps = (bytesNow - dlState.lastBytes) / elapsed;
-                dlState.speed = speedBps > 0 ? formatFileSize(speedBps) + '/s' : '';
-                dlState.lastBytes = bytesNow;
+              if (elapsed >= 0.5) {
+                const speedBps = (dlState.fileBytesDownloaded - dlState.lastBytes) / elapsed;
+                dlState.speedBps = speedBps > 0 ? speedBps : (dlState.speedBps || 0);
+                dlState.speed = dlState.speedBps > 0 ? formatFileSize(dlState.speedBps) + '/s' : '';
+                dlState.lastBytes = dlState.fileBytesDownloaded;
                 dlState.lastTime = now;
               }
-
-              dlState.percent = Math.min(99, overallPct);
-              dlState.bytesDownloaded = data.bytesDownloaded || bytesNow;
-              dlState.bytesTotal = data.totalBytes || 0;
               updateModelDownloadProgress(modelKey, data);
-            }
-            if (progressEl && !downloadProgress[modelKey]) {
-              progressEl.textContent = `\u6B63\u5728\u4E0B\u8F7D: ${data.name} (${data.file}/${data.total})`;
             }
           } else if (data.type === 'done') {
             delete window[cb];
             delete downloadProgress[modelKey];
             if (data.result === 'ok') {
-              showToast('\u8BF4\u8BDD\u4EBA\u8BC6\u522B\u6A21\u578B\u4E0B\u8F7D\u5B8C\u6210');
+              showToast('说话人识别模型下载完成');
               renderSettingsModels();
             } else {
-              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">\u4E0B\u8F7D\u5931\u8D25: ${data.result}</span>`;
+              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">下载失败: ${data.result}</span>`;
               btn.disabled = false;
-              btn.textContent = '\u91CD\u8BD5\u4E0B\u8F7D';
+              btn.textContent = '重试下载';
             }
           }
         };

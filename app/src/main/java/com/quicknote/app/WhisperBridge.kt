@@ -316,22 +316,34 @@ class WhisperBridge(private val context: Context) {
 
     private fun downloadFile(urlStr: String, dest: File) {
         if (dest.exists() && dest.length() > 100) return
+        Log.i(TAG, "Downloading: $urlStr")
 
-        var conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.connectTimeout = 30_000
-        conn.readTimeout    = 300_000
-        conn.instanceFollowRedirects = true
-
-        // HuggingFace chains multiple redirects
-        repeat(8) {
+        // Manually follow redirects (HttpURLConnection does NOT follow cross-host redirects)
+        var currentUrl = urlStr
+        var conn: HttpURLConnection? = null
+        for (hop in 0 until 10) {
+            conn = URL(currentUrl).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false   // we handle redirects ourselves
+            conn.connectTimeout = 30_000
+            conn.readTimeout    = 300_000
+            conn.setRequestProperty("User-Agent", "QuickNote/1.0 Android")
             val code = conn.responseCode
+            Log.i(TAG, "  hop $hop → $code  url=${currentUrl.take(80)}")
             if (code in 301..308) {
-                val loc = conn.getHeaderField("Location") ?: return@repeat
+                val loc = conn.getHeaderField("Location")
                 conn.disconnect()
-                conn = URL(loc).openConnection() as HttpURLConnection
-                conn.connectTimeout = 30_000
-                conn.readTimeout    = 300_000
+                if (loc.isNullOrEmpty()) throw Exception("Redirect without Location header")
+                currentUrl = if (loc.startsWith("http")) loc else URL(URL(currentUrl), loc).toString()
+            } else if (code == 200) {
+                break
+            } else {
+                conn.disconnect()
+                throw Exception("HTTP $code for ${dest.name}")
             }
+        }
+
+        if (conn == null || conn.responseCode != 200) {
+            throw Exception("Failed to connect after redirects for ${dest.name}")
         }
 
         val tmp = File(dest.parent, "${dest.name}.tmp")
@@ -343,10 +355,11 @@ class WhisperBridge(private val context: Context) {
                     while (inp.read(buf).also { n = it } != -1) out.write(buf, 0, n)
                 }
             }
+            Log.i(TAG, "  saved ${tmp.length()} bytes → ${dest.name}")
         } finally {
             conn.disconnect()
         }
-        if (!tmp.renameTo(dest)) throw Exception("Failed to save ${dest.name}")
+        if (!tmp.renameTo(dest)) throw Exception("Failed to rename tmp → ${dest.name}")
     }
 
     // ── Audio decoding: M4A/AAC → 16 kHz mono float[] ─────────────────────

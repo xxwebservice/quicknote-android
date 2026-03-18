@@ -1251,7 +1251,7 @@
       dom.sendBtn.disabled = !dom.noteInput.value.trim();
     });
     dom.noteInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(dom.noteInput.value); }
+      if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); addNote(dom.noteInput.value); }
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 

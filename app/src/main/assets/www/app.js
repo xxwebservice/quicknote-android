@@ -938,7 +938,7 @@
   function autoResize() {
     const el = dom.noteInput;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }
 
   let wakeLock = null;

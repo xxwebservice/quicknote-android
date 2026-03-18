@@ -1067,8 +1067,9 @@
   }
 
   function getTranscriptEstimatedMs(modelId, durationSecs, diarize) {
-    const factor = modelId === 'large-v3-turbo' ? 5 : modelId === 'small' ? 10 : 20;
-    const base = Math.max(10, Math.ceil(durationSecs / factor));
+    // Conservative: mobile is much slower than desktop benchmarks
+    const factor = modelId === 'large-v3-turbo' ? 3 : modelId === 'small' ? 5 : 10;
+    const base = Math.max(15, Math.ceil(durationSecs / factor));
     return (diarize ? base * 2.5 : base) * 1000;
   }
 
@@ -1079,15 +1080,26 @@
     if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = '0%';
     progressTimer = setInterval(() => {
       const elapsed  = Date.now() - progressStartMs;
-      const pct      = Math.min(95, (elapsed / progressEstimatedMs) * 100);
       const elapsedS = Math.floor(elapsed / 1000);
-      const remainS  = Math.max(0, Math.ceil((progressEstimatedMs - elapsed) / 1000));
-      if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = pct + '%';
+      // Asymptotic progress: never stalls at a fixed cap.
+      // Before estimate: linear to 80%. After estimate: slow log curve toward 99%.
+      let pct;
+      if (elapsed <= progressEstimatedMs) {
+        pct = (elapsed / progressEstimatedMs) * 80;
+      } else {
+        // Overtime: 80 + 19 * (1 - 1/(1 + overtimeRatio))  → approaches 99 but never reaches it
+        const overtimeRatio = (elapsed - progressEstimatedMs) / progressEstimatedMs;
+        pct = 80 + 19 * (1 - 1 / (1 + overtimeRatio * 1.5));
+      }
+      if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = pct.toFixed(1) + '%';
       if (dom.transcriptionStatus) {
-        const phase = diarize && elapsed < progressEstimatedMs / 3 ? '\u5206\u6790\u8BF4\u8BDD\u4EBA\u4E2D...' : '\u8F6C\u5F55\u4E2D...';
-        dom.transcriptionStatus.textContent = remainS > 0
-          ? `${phase} \u5DF2\u7528\u65F6 ${elapsedS}\u79D2\uFF0C\u7EA6\u8FD8\u9700 ${remainS}\u79D2`
-          : `${phase} \u5DF2\u7528\u65F6 ${elapsedS}\u79D2`;
+        const phase = diarize && elapsed < progressEstimatedMs / 3 ? '分析说话人中...' : '转录中...';
+        if (elapsed <= progressEstimatedMs) {
+          const remainS = Math.max(0, Math.ceil((progressEstimatedMs - elapsed) / 1000));
+          dom.transcriptionStatus.textContent = `${phase} 已用时 ${elapsedS}秒，约还需 ${remainS}秒`;
+        } else {
+          dom.transcriptionStatus.textContent = `${phase} 已用时 ${elapsedS}秒，比预计时间长，仍在处理中...`;
+        }
       }
     }, 1000);
   }

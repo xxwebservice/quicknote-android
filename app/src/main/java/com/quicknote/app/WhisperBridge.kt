@@ -234,7 +234,7 @@ class WhisperBridge(private val context: Context) {
                 minDurationOn  = 0.3f,
                 minDurationOff = 0.5f,
             )
-            val sd = OfflineSpeakerDiarization(sdConfig)
+            val sd = OfflineSpeakerDiarization(null, sdConfig)
             Log.i(TAG, "Diarization: running segmentation + clustering")
             val segments = sd.process(samples)
             sd.release()
@@ -306,7 +306,7 @@ class WhisperBridge(private val context: Context) {
             tokens     = File(dir, "tokens.txt").absolutePath,
             numThreads = 4,
         )
-        return OfflineRecognizer(OfflineRecognizerConfig(modelConfig = modelConfig))
+        return OfflineRecognizer(null, OfflineRecognizerConfig(modelConfig = modelConfig))
     }
 
     private fun fmtSecs(secs: Float): String {

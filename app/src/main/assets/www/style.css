@@ -802,6 +802,33 @@ header {
   color: var(--text-muted);
   line-height: 1.4;
 }
+.settings-action-btn {
+  padding: 6px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--md-sys-shape-small);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.settings-action-btn:active { opacity: 0.8; }
+
+.settings-input {
+  width: 100%;
+  padding: var(--space-3) 14px;
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-small);
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.settings-input:focus { border-color: var(--accent); }
+
 .settings-select {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--md-sys-color-outline);

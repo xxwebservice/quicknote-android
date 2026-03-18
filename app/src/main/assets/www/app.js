@@ -628,8 +628,8 @@
     }
     saveSessions();
     clearActiveSession();
-    openReview(finishedSession);
-    currentSession = null; // prevent accidental reuse
+    openReview(finishedSession); // this sets currentSession = finishedSession
+    // Do NOT null out currentSession here — Review screen needs it for export/share
     mediaRecorder = null; audioChunks = [];
     renderSessionList(dom.sessionList, false, 5);
   }

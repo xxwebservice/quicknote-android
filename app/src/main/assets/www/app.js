@@ -689,13 +689,32 @@
   function renderNoteEntry(note) {
     const entry = document.createElement('div');
     entry.className = 'note-entry';
-    if (note.type === 'image' && note.imageDataUrl) {
+    if (note.type === 'image' && (note.imageDataUrl || note.imageFile)) {
+      const imgSrc = note.imageDataUrl || '';
       entry.innerHTML = `
         <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
         <div class="note-image">
-          <img src="${note.imageDataUrl}" alt="photo">
-          <div class="note-img-label">${formatTimestamp(note.timestamp)} 拍照</div>
+          ${imgSrc ? `<img src="${imgSrc}" alt="photo" data-file="${escapeHtml(note.imageFile || '')}">` : `<span style="color:var(--text-muted)">[图片]</span>`}
+          <div class="note-img-actions">
+            <button class="img-action-btn" data-action="view" data-file="${escapeHtml(note.imageFile || '')}">查看</button>
+            <button class="img-action-btn" data-action="edit" data-file="${escapeHtml(note.imageFile || '')}">编辑标注</button>
+          </div>
         </div>`;
+      // Image action buttons
+      entry.querySelectorAll('.img-action-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const file = btn.dataset.file;
+          if (!file || !isNative) return;
+          if (btn.dataset.action === 'edit') NativeBridge.openImageEditor(file);
+          else NativeBridge.openImageViewer(file);
+        });
+      });
+      // Tap image itself to view
+      const img = entry.querySelector('img');
+      if (img) img.addEventListener('click', () => {
+        if (note.imageFile && isNative) NativeBridge.openImageViewer(note.imageFile);
+      });
     } else {
       entry.innerHTML = `
         <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>

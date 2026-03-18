@@ -279,7 +279,6 @@
     dom.menuDropdown.classList.add('hidden');
 
     if (outEl && !reverse) {
-      // Forward animation
       outEl.classList.remove('active');
       inEl.classList.add('active', 'entering');
       inEl.addEventListener('animationend', function handler() {
@@ -287,7 +286,6 @@
         inEl.classList.remove('entering');
       });
     } else if (outEl && reverse) {
-      // Backward - just swap immediately for now (slide right would require keeping both visible)
       outEl.classList.remove('active');
       inEl.classList.add('active');
     } else {
@@ -297,11 +295,31 @@
 
     currentScreenId = id;
 
-    // Update header state
+    // Show/hide global recording banner when not on notes screen
+    updateRecordingBanner();
+  }
+
+  function updateRecordingBanner() {
+    let banner = $('#recording-global-banner');
     const isRecording = !!recordingStartTime;
-    const header = $('#header');
-    if (header) {
-      header.classList.toggle('recording', isRecording);
+    const onNotesScreen = currentScreenId === 'notes-screen';
+
+    if (isRecording && !onNotesScreen) {
+      // Show banner: "Recording in progress — tap to return"
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'recording-global-banner';
+        banner.className = 'recording-global-banner';
+        banner.textContent = '记录进行中 · 点击返回';
+        banner.addEventListener('click', () => {
+          showScreen('notes-screen', false);
+          screenHistory.push('notes-screen');
+        });
+        document.getElementById('main-content')?.prepend(banner);
+      }
+      banner.style.display = '';
+    } else if (banner) {
+      banner.style.display = 'none';
     }
   }
 
@@ -389,6 +407,76 @@
     renderSessionList(dom.historyList, true);
   }
 
+  // --- Active session persistence (crash recovery) ---
+  const ACTIVE_SESSION_KEY = 'quicknote_active_session';
+  const ACTIVE_STATE_KEY   = 'quicknote_active_state';
+
+  function saveActiveSession() {
+    if (!currentSession) return;
+    // Save full session (strip imageDataUrl to avoid quota)
+    const toSave = {
+      ...currentSession,
+      duration: recordingStartTime ? Date.now() - recordingStartTime : currentSession.duration,
+      notes: currentSession.notes.map(n => { const { imageDataUrl, ...rest } = n; return rest; }),
+    };
+    try { localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(toSave)); } catch(e) { console.warn('autosave:', e); }
+  }
+
+  function saveActiveState(recording) {
+    try {
+      localStorage.setItem(ACTIVE_STATE_KEY, JSON.stringify({
+        recording: !!recording,
+        recordingStartTime: recordingStartTime,
+        screenId: currentScreenId,
+      }));
+    } catch(e) {}
+  }
+
+  function clearActiveSession() {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+    localStorage.removeItem(ACTIVE_STATE_KEY);
+  }
+
+  function checkForRecovery() {
+    const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+    const state = localStorage.getItem(ACTIVE_STATE_KEY);
+    if (!saved) return;
+    try {
+      const session = JSON.parse(saved);
+      const st = state ? JSON.parse(state) : {};
+      if (!session || !session.id || !session.notes) { clearActiveSession(); return; }
+      // Check if this session is already in the finished sessions list
+      if (sessions.find(s => s.id === session.id)) { clearActiveSession(); return; }
+      // Found an interrupted session — offer recovery
+      const noteCount = session.notes.length;
+      const dur = session.duration ? formatTime(session.duration) : '未知';
+      if (confirm(`发现未保存的记录「${session.title}」（${noteCount}条笔记，${dur}）。\n\n是否恢复？`)) {
+        // Recover: add to sessions and open review
+        sessions.push(session);
+        saveSessions();
+        clearActiveSession();
+        openReview(session);
+        showToast('记录已恢复');
+      } else {
+        clearActiveSession();
+      }
+    } catch(e) { clearActiveSession(); }
+  }
+
+  let autoSaveInterval = null;
+
+  function startAutoSave() {
+    stopAutoSave();
+    autoSaveInterval = setInterval(() => {
+      saveActiveSession();
+      saveActiveState(true);
+    }, 5000); // every 5 seconds
+  }
+
+  function stopAutoSave() {
+    if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+  }
+
   // --- Recording ---
   async function startRecording() {
     const id = generateId();
@@ -397,7 +485,7 @@
 
     currentSession = {
       id,
-      title: dom.meetingTitle.value.trim() || `\u4F1A\u8BAE ${formatDate(Date.now())}`,
+      title: dom.meetingTitle.value.trim() || `会议 ${formatDate(Date.now())}`,
       startTime: Date.now(), duration: 0, notes: [], hasAudio: false,
       nativeAudioFile: null,
     };
@@ -447,7 +535,10 @@
     dom.noteInput.value = '';
     dom.sendBtn.disabled = true;
 
-    // Discreet mode: no visible recording indicators
+    // Start real-time auto-save
+    saveActiveSession();
+    saveActiveState(true);
+    startAutoSave();
 
     navigateTo('notes-screen');
     setTimeout(() => dom.noteInput.focus(), 300);
@@ -474,11 +565,10 @@
     clearInterval(timerInterval); timerInterval = null;
     clearTimeout(autoStopTimer); autoStopTimer = null;
     if (currentSession) currentSession.duration = Date.now() - recordingStartTime;
+    saveActiveSession(); // save final state before finishing
     dom.statusDot.classList.add('hidden');
     dom.timer.classList.add('hidden');
     dom.stopBtn.classList.add('hidden');
-
-    // Clean up (discreet mode — nothing visible to hide)
 
     releaseWakeLock();
     if (isNative) {
@@ -492,9 +582,11 @@
   }
 
   function finishRecording() {
+    stopAutoSave();
     recordingStartTime = null;
     sessions.push(currentSession);
     saveSessions();
+    clearActiveSession(); // clean up recovery data
     openReview(currentSession);
     mediaRecorder = null; audioChunks = [];
     renderSessionList(dom.sessionList, false, 5);
@@ -546,6 +638,7 @@
         };
         currentSession.notes.push(note);
         saveSessions();
+        saveActiveSession(); // real-time save
         dom.emptyHint.classList.add('hidden');
         renderNoteEntry(note);
         dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
@@ -574,6 +667,7 @@
     dom.sendBtn.disabled = true;
     autoResize();
     dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
+    saveActiveSession(); // real-time save after every note
   }
 
   /** Render note text with inline markdown formatting */
@@ -1410,6 +1504,7 @@
             };
             currentSession.notes.push(note);
             saveSessions();
+            saveActiveSession(); // real-time save
             dom.emptyHint.classList.add('hidden');
             renderNoteEntry(note);
             dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
@@ -1653,10 +1748,25 @@
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && mediaRecorder?.state === 'recording') requestWakeLock();
+      // Emergency save when app goes to background
+      if (document.visibilityState === 'hidden' && currentSession && recordingStartTime) {
+        saveActiveSession();
+      }
+    });
+
+    // Emergency save on page unload (app killed, WebView destroyed)
+    window.addEventListener('pagehide', () => {
+      if (currentSession && recordingStartTime) saveActiveSession();
+    });
+    window.addEventListener('beforeunload', () => {
+      if (currentSession && recordingStartTime) saveActiveSession();
     });
 
     // Load initial settings
     applySettingsToUI();
+
+    // Check for interrupted session recovery
+    checkForRecovery();
   }
 
   if ('serviceWorker' in navigator) {

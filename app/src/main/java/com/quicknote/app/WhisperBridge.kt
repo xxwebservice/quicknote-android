@@ -6,14 +6,10 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FastClusteringConfig
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeakerDiarization
 import com.k2fsa.sherpa.onnx.OfflineSpeakerDiarizationConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeakerSegmentationModelConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeakerSegmentationPyannoteModelConfig
-import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,39 +34,34 @@ class WhisperBridge(private val context: Context) {
     data class ModelDef(
         val id: String,
         val name: String,
-        val encoderUrl: String,
-        val decoderUrl: String,
-        val tokensUrl: String,
+        val modelUrl: String,
         val sizeMb: Int,
     )
 
     companion object {
         private const val TAG = "WhisperBridge"
 
-        // ── Whisper models ─────────────────────────────────────────────────
+        // ── Whisper models (ggml quantized, single file each) ────────────
         val MODELS = listOf(
             ModelDef(
-                "tiny", "Tiny · 86MB · 最快",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-tokens.txt",
-                86,
+                "tiny", "Tiny \u00b7 32MB \u00b7 \u6700\u5feb",
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
+                32,
             ),
             ModelDef(
-                "small", "Small · 488MB · 推荐",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-tokens.txt",
-                488,
+                "base", "Base \u00b7 60MB \u00b7 \u63a8\u8350",
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
+                60,
             ),
             ModelDef(
-                "large-v3-turbo", "Large-v3-turbo · 809MB · 最准",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-tokens.txt",
-                809,
+                "small", "Small \u00b7 190MB \u00b7 \u6700\u51c6",
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+                190,
             ),
         )
+
+        // Model filename inside the model directory
+        private const val MODEL_FILENAME = "model.bin"
 
         // ── Diarization model (~37MB total, stored in models/diarization/) ─
         // Segmentation: pyannote segmentation-3.0 converted to ONNX (~11.5MB)
@@ -85,16 +76,17 @@ class WhisperBridge(private val context: Context) {
     private fun modelDir(modelId: String): File =
         File(File(context.getExternalFilesDir("QuickNote"), "models"), modelId)
 
+    private fun modelFile(modelId: String): File =
+        File(modelDir(modelId), MODEL_FILENAME)
+
     private fun diarizationDir(): File =
         File(File(context.getExternalFilesDir("QuickNote"), "models"), "diarization")
 
-    // ── Whisper model management ───────────────────────────────────────────
+    // ── Whisper model management ─────────────────────────────────────────
 
     fun isModelDownloaded(modelId: String): Boolean {
-        val dir = modelDir(modelId)
-        return File(dir, "encoder.int8.onnx").exists() &&
-               File(dir, "decoder.int8.onnx").exists() &&
-               File(dir, "tokens.txt").exists()
+        val file = modelFile(modelId)
+        return file.exists() && file.length() > 1000
     }
 
     fun getModelsJson(): String {
@@ -116,17 +108,9 @@ class WhisperBridge(private val context: Context) {
         val dir = modelDir(modelId)
         dir.mkdirs()
 
-        val files = listOf(
-            "encoder.int8.onnx" to model.encoderUrl,
-            "decoder.int8.onnx" to model.decoderUrl,
-            "tokens.txt"        to model.tokensUrl,
-        )
-
         return try {
-            files.forEachIndexed { idx, (name, url) ->
-                progress.onProgress(idx + 1, files.size, name)
-                downloadFile(url, File(dir, name), byteProgress)
-            }
+            progress.onProgress(1, 1, MODEL_FILENAME)
+            downloadFile(model.modelUrl, File(dir, MODEL_FILENAME), byteProgress)
             null
         } catch (e: Exception) {
             Log.e(TAG, "Download failed for $modelId", e)
@@ -141,7 +125,7 @@ class WhisperBridge(private val context: Context) {
         dir.delete()
     }
 
-    // ── Diarization model management ───────────────────────────────────────
+    // ── Diarization model management ─────────────────────────────────────
 
     fun isDiarizationModelDownloaded(): Boolean {
         val dir = diarizationDir()
@@ -181,7 +165,7 @@ class WhisperBridge(private val context: Context) {
         dir.delete()
     }
 
-    // ── Transcription ──────────────────────────────────────────────────────
+    // ── Transcription ────────────────────────────────────────────────────
 
     /** Plain transcription without speaker labels. Blocking. */
     fun transcribeAudio(audioFilename: String, modelId: String, language: String): String {
@@ -192,8 +176,8 @@ class WhisperBridge(private val context: Context) {
             Log.i(TAG, "Decoding M4A: ${audioFile.length()} bytes")
             val samples = decodeAudioToFloat(audioFile.absolutePath)
                 ?: return "error: audio decode failed"
-            Log.i(TAG, "Decoded ${samples.size} samples — running Whisper")
-            runWhisper(samples, modelDir(modelId), language)
+            Log.i(TAG, "Decoded ${samples.size} samples \u2014 running Whisper")
+            runWhisper(samples, modelId, language)
         } catch (e: Exception) {
             Log.e(TAG, "Transcription error", e)
             "error: ${e.message}"
@@ -213,8 +197,7 @@ class WhisperBridge(private val context: Context) {
         val audioFile = File(context.getExternalFilesDir("QuickNote"), audioFilename)
         if (!audioFile.exists())               return "error: audio file not found ($audioFilename)"
 
-        val whisperDir = modelDir(modelId)
-        val diarDir    = diarizationDir()
+        val diarDir = diarizationDir()
 
         return try {
             // 1. Decode full audio to 16 kHz mono float[]
@@ -223,7 +206,7 @@ class WhisperBridge(private val context: Context) {
                 ?: return "error: audio decode failed"
             Log.i(TAG, "Diarization: ${samples.size} samples decoded")
 
-            // 2. Run speaker diarization
+            // 2. Run speaker diarization (sherpa-onnx)
             val sdConfig = OfflineSpeakerDiarizationConfig(
                 segmentation = OfflineSpeakerSegmentationModelConfig(
                     pyannote   = OfflineSpeakerSegmentationPyannoteModelConfig(
@@ -246,72 +229,73 @@ class WhisperBridge(private val context: Context) {
             Log.i(TAG, "Diarization: ${segments.size} segments")
 
             if (segments.isEmpty()) {
-                Log.w(TAG, "Zero diarization segments — falling back to plain transcription")
-                return runWhisper(samples, whisperDir, language)
+                Log.w(TAG, "Zero diarization segments \u2014 falling back to plain transcription")
+                return runWhisper(samples, modelId, language)
             }
 
-            // 3. Transcribe each speaker segment with Whisper
-            val recognizer   = buildRecognizer(whisperDir, language)
-            val speakerChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            val sb           = StringBuilder()
+            // 3. Load whisper.cpp context once for all segments
+            val modelPath = modelFile(modelId).absolutePath
+            val ctxPtr = WhisperCpp.initContext(modelPath)
+            if (ctxPtr == 0L) {
+                Log.e(TAG, "Failed to init whisper context for diarization")
+                return "error: failed to load whisper model"
+            }
 
-            segments.forEachIndexed { i, seg ->
-                val startSample = (seg.start * 16_000).toInt().coerceIn(0, samples.size)
-                val endSample   = (seg.end   * 16_000).toInt().coerceIn(0, samples.size)
-                if (endSample - startSample < 3_200) return@forEachIndexed // skip < 0.2 s
+            try {
+                val speakerChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                val sb = StringBuilder()
+                val numThreads = 4
 
-                val segSamples = samples.copyOfRange(startSample, endSample)
-                val stream     = recognizer.createStream()
-                stream.acceptWaveform(segSamples, sampleRate = 16_000)
-                recognizer.decode(stream)
-                val text = recognizer.getResult(stream).text.trim()
+                segments.forEachIndexed { i, seg ->
+                    val startSample = (seg.start * 16_000).toInt().coerceIn(0, samples.size)
+                    val endSample   = (seg.end   * 16_000).toInt().coerceIn(0, samples.size)
+                    if (endSample - startSample < 3_200) return@forEachIndexed // skip < 0.2 s
 
-                if (text.isNotEmpty()) {
-                    val label    = if (seg.speaker < speakerChars.length)
-                        speakerChars[seg.speaker].toString() else "${seg.speaker + 1}"
-                    val startStr = fmtSecs(seg.start)
-                    val endStr   = fmtSecs(seg.end)
-                    sb.append("[说话人$label $startStr-$endStr] $text\n")
+                    val segSamples = samples.copyOfRange(startSample, endSample)
+                    val text = WhisperCpp.transcribe(ctxPtr, segSamples, numThreads, language).trim()
+
+                    if (text.isNotEmpty() && !text.startsWith("error:")) {
+                        val label = if (seg.speaker < speakerChars.length)
+                            speakerChars[seg.speaker].toString() else "${seg.speaker + 1}"
+                        val startStr = fmtSecs(seg.start)
+                        val endStr   = fmtSecs(seg.end)
+                        sb.append("[\u8bf4\u8bdd\u4eba$label $startStr-$endStr] $text\n")
+                    }
+                    Log.i(TAG, "Segment ${i+1}/${segments.size} transcribed")
                 }
-                Log.i(TAG, "Segment ${i+1}/${segments.size} transcribed")
-            }
-            recognizer.release()
 
-            val result = sb.toString().trim()
-            if (result.isEmpty()) runWhisper(samples, whisperDir, language) else result
+                val result = sb.toString().trim()
+                if (result.isEmpty()) runWhisper(samples, modelId, language) else result
+            } finally {
+                WhisperCpp.freeContext(ctxPtr)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Diarization transcription error", e)
             "error: ${e.message}"
         }
     }
 
-    // ── Private helpers ────────────────────────────────────────────────────
+    // ── Private helpers ──────────────────────────────────────────────────
 
-    private fun runWhisper(samples: FloatArray, dir: File, language: String): String {
-        val recognizer = buildRecognizer(dir, language)
-        val stream = recognizer.createStream()
-        stream.acceptWaveform(samples, sampleRate = 16_000)
-        recognizer.decode(stream)
-        val text = recognizer.getResult(stream).text.trim()
-        recognizer.release()
-        Log.i(TAG, "Whisper complete: ${text.length} chars")
-        return text
-    }
-
-    private fun buildRecognizer(dir: File, language: String): OfflineRecognizer {
-        val whisperConfig = OfflineWhisperModelConfig(
-            encoder      = File(dir, "encoder.int8.onnx").absolutePath,
-            decoder      = File(dir, "decoder.int8.onnx").absolutePath,
-            language     = language.ifEmpty { "" },
-            task         = "transcribe",
-            tailPaddings = -1,
-        )
-        val modelConfig = OfflineModelConfig(
-            whisper    = whisperConfig,
-            tokens     = File(dir, "tokens.txt").absolutePath,
-            numThreads = 4,
-        )
-        return OfflineRecognizer(null, OfflineRecognizerConfig(modelConfig = modelConfig))
+    /**
+     * Run whisper.cpp transcription on full audio.
+     * Loads and frees the context within this call.
+     */
+    private fun runWhisper(samples: FloatArray, modelId: String, language: String): String {
+        val modelPath = modelFile(modelId).absolutePath
+        val ctxPtr = WhisperCpp.initContext(modelPath)
+        if (ctxPtr == 0L) {
+            Log.e(TAG, "runWhisper: failed to init context")
+            return "error: failed to load whisper model"
+        }
+        return try {
+            val numThreads = 4
+            val text = WhisperCpp.transcribe(ctxPtr, samples, numThreads, language).trim()
+            Log.i(TAG, "Whisper complete: ${text.length} chars")
+            text
+        } finally {
+            WhisperCpp.freeContext(ctxPtr)
+        }
     }
 
     private fun fmtSecs(secs: Float): String {
@@ -321,10 +305,10 @@ class WhisperBridge(private val context: Context) {
 
     private fun downloadFile(urlStr: String, dest: File, byteProgress: ByteProgressCallback? = null) {
         if (dest.exists() && dest.length() > 100) return
-        Log.i(TAG, "Downloading: $urlStr → ${dest.name}")
+        Log.i(TAG, "Downloading: $urlStr \u2192 ${dest.name}")
 
         // Manually follow redirects — HttpURLConnection does NOT follow cross-host
-        // redirects (e.g. huggingface.co → cas-bridge.xethub.hf.co) even with
+        // redirects (e.g. huggingface.co -> cas-bridge.xethub.hf.co) even with
         // instanceFollowRedirects = true.
         var currentUrl = urlStr
         var finalCode = -1
@@ -380,14 +364,14 @@ class WhisperBridge(private val context: Context) {
                     }
                 }
             }
-            Log.i(TAG, "  saved ${tmp.length()} bytes → ${dest.name}")
+            Log.i(TAG, "  saved ${tmp.length()} bytes \u2192 ${dest.name}")
         } finally {
             conn.disconnect()
         }
-        if (!tmp.renameTo(dest)) throw Exception("Failed to rename tmp → ${dest.name}")
+        if (!tmp.renameTo(dest)) throw Exception("Failed to rename tmp \u2192 ${dest.name}")
     }
 
-    // ── Audio decoding: M4A/AAC → 16 kHz mono float[] ─────────────────────
+    // ── Audio decoding: M4A/AAC -> 16 kHz mono float[] ──────────────────
     private fun decodeAudioToFloat(filePath: String): FloatArray? {
         val extractor = MediaExtractor()
         extractor.setDataSource(filePath)

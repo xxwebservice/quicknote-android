@@ -46,23 +46,23 @@ class WhisperBridge(private val context: Context) {
         val MODELS = listOf(
             ModelDef(
                 "tiny", "Tiny · 86MB · 最快",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tokens.txt",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-encoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-decoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/tiny-tokens.txt",
                 86,
             ),
             ModelDef(
                 "small", "Small · 488MB · 推荐",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/tokens.txt",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-encoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-decoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/small-tokens.txt",
                 488,
             ),
             ModelDef(
                 "large-v3-turbo", "Large-v3-turbo · 809MB · 最准",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3-turbo/resolve/main/encoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3-turbo/resolve/main/decoder.int8.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3-turbo/resolve/main/tokens.txt",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-encoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-decoder.int8.onnx",
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main/turbo-tokens.txt",
                 809,
             ),
         )
@@ -71,7 +71,7 @@ class WhisperBridge(private val context: Context) {
         // Segmentation: pyannote segmentation-3.0 converted to ONNX (~11.5MB)
         // Embedding:    3D-Speaker multilingual speaker embedding (~25MB)
         const val DIARIZE_SEG_URL  = "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx"
-        const val DIARIZE_EMB_URL  = "https://huggingface.co/csukuangfj/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k/resolve/main/model.onnx"
+        const val DIARIZE_EMB_URL  = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
         const val DIARIZE_SIZE_MB  = 37
     }
 

@@ -27,12 +27,14 @@
     </header>
 
     <div id="menu-dropdown" class="menu-dropdown hidden">
-      <button id="menu-export" class="menu-item">导出笔记</button>
-      <button id="menu-history" class="menu-item">历史记录</button>
-      <button id="menu-exports" class="menu-item">已导出文件</button>
+      <button id="menu-export"   class="menu-item">导出笔记</button>
+      <button id="menu-history"  class="menu-item">历史记录</button>
+      <button id="menu-exports"  class="menu-item">已导出文件</button>
+      <button id="menu-settings" class="menu-item">设置</button>
     </div>
 
     <main id="main-content">
+
       <!-- Start -->
       <div id="start-screen" class="screen active">
         <div class="start-container">
@@ -75,7 +77,7 @@
           <div id="review-notes" class="review-notes"></div>
           <div class="review-actions">
             <button id="export-btn" class="action-btn primary">导出 ZIP</button>
-            <button id="share-btn" class="action-btn share">分享</button>
+            <button id="share-btn"  class="action-btn share">分享</button>
           </div>
           <div class="review-actions hidden" id="transcribe-action-row" style="margin-top:10px">
             <button id="transcribe-entry-btn" class="action-btn transcribe-btn">本地转录</button>
@@ -83,7 +85,7 @@
           <div class="review-actions" style="margin-top:10px">
             <button id="new-btn" class="action-btn">新建记录</button>
           </div>
-          <p class="export-hint">ZIP包含：录音 + 笔记 + Claude分析指引（如已转录也包含transcript）</p>
+          <p class="export-hint">ZIP包含录音 + 笔记 + Claude指引（已转录则同时包含文字稿）</p>
         </div>
       </div>
 
@@ -108,43 +110,79 @@
           <div id="exports-list"></div>
         </div>
       </div>
+
+      <!-- Settings -->
+      <div id="settings-screen" class="screen">
+        <div class="list-screen-header">
+          <button id="back-from-settings" class="icon-btn">←</button>
+          <h2>设置</h2>
+        </div>
+        <div class="list-screen-body">
+          <p class="section-title" style="margin-bottom:6px">本地转录模型</p>
+          <p class="settings-hint">模型存储在本机，下载后无需网络即可转录。每个模型只需下载一次。</p>
+          <div id="settings-model-list" style="margin-top:12px"></div>
+        </div>
+      </div>
+
       <!-- Transcription -->
       <div id="transcription-screen" class="screen">
         <div class="list-screen-header">
           <button id="back-from-transcription" class="icon-btn">←</button>
-          <h2>本地语音转录</h2>
+          <h2>本地转录</h2>
         </div>
         <div class="list-screen-body">
-          <p class="section-title" style="margin-bottom:8px">选择模型</p>
-          <div id="whisper-model-list"></div>
 
-          <div style="margin-top:20px">
-            <p class="section-title" style="margin-bottom:8px">语言</p>
+          <div id="transcription-no-model" class="transcription-no-model hidden">
+            <p>还没有下载转录模型。</p>
+            <button id="go-to-settings-btn" class="action-btn primary" style="margin-top:12px">前往设置下载模型</button>
+          </div>
+
+          <div id="transcription-has-model">
+            <p class="section-title" style="margin-bottom:8px">使用模型</p>
+            <select id="transcription-model-select" class="whisper-lang-select"></select>
+
+            <p class="section-title" style="margin-bottom:8px;margin-top:16px">语言</p>
             <select id="whisper-lang-select" class="whisper-lang-select">
               <option value="">自动检测</option>
               <option value="zh">中文 (zh)</option>
               <option value="en">English (en)</option>
               <option value="ja">日文 (ja)</option>
             </select>
+
+            <div id="diarize-toggle-row" class="toggle-row hidden" style="margin-top:16px">
+              <label class="toggle-label" for="diarize-toggle">
+                <span>说话人识别</span>
+                <span class="toggle-hint">区分多人发言，时间稍长</span>
+              </label>
+              <input type="checkbox" id="diarize-toggle" class="toggle-checkbox">
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button id="transcribe-btn" class="action-btn primary" style="flex:1">开始转录</button>
+              <button id="cancel-transcribe-btn" class="action-btn" style="flex:1;display:none">取消</button>
+            </div>
           </div>
 
-          <button id="transcribe-btn" class="action-btn primary" style="margin-top:16px" disabled>开始转录</button>
-          <button id="cancel-transcribe-btn" class="action-btn" style="margin-top:8px;display:none">取消转录</button>
-
-          <div id="transcription-progress-wrap" class="progress-wrap hidden">
+          <div id="transcription-progress-wrap" class="progress-wrap hidden" style="margin-top:16px">
             <div class="progress-bar-track"><div id="transcription-progress-bar" class="progress-bar-fill"></div></div>
             <div id="transcription-status" class="transcription-status"></div>
           </div>
 
-          <div id="transcription-result" class="transcription-result hidden">
+          <div id="transcription-result" class="transcription-result hidden" style="margin-top:16px">
             <div class="result-header-row">
               <span class="section-title">转录结果</span>
               <button id="copy-transcript-btn" class="copy-btn">复制</button>
             </div>
             <div id="transcript-text" class="transcript-text"></div>
+            <div class="merge-action-row">
+              <button id="merge-notes-btn" class="action-btn merge-btn">📋 融合笔记</button>
+              <button id="share-merged-btn" class="action-btn merge-share-btn hidden">分享文档</button>
+            </div>
           </div>
+
         </div>
       </div>
+
     </main>
   </div>
 

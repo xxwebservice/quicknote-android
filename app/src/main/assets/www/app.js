@@ -208,7 +208,11 @@
     localStorage.setItem('quicknote_sessions', JSON.stringify(
       sessions.map(s => ({
         id:s.id, title:s.title, startTime:s.startTime, duration:s.duration,
-        notes:s.notes, hasAudio:s.hasAudio||false,
+        notes: s.notes.map(n => {
+          const { imageDataUrl, ...rest } = n; // strip dataUrl (too large for localStorage)
+          return rest;
+        }),
+        hasAudio:s.hasAudio||false,
         nativeAudioFile:s.nativeAudioFile||null,
         transcription:s.transcription||null,
       }))
@@ -497,6 +501,69 @@
   }
 
   // --- Notes ---
+  function addImageNote(file) {
+    if (!currentSession || !file) return;
+    const timestamp = Date.now() - recordingStartTime;
+    const imgFilename = `${currentSession.id}_img_${Date.now()}.jpg`;
+
+    // Read file, compress, save
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      // Compress image
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1600;
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = h * maxDim / w; w = maxDim; }
+          else { w = w * maxDim / h; h = maxDim; }
+        }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const b64 = dataUrl.split(',')[1];
+
+        // Save to disk via NativeBridge
+        if (isNative) {
+          NativeBridge.saveFile(imgFilename, b64);
+        }
+
+        // Save to IDB for web fallback
+        try {
+          const db = await openAudioDB();
+          await idbPut(db, 'audio', { id: imgFilename, blob: dataUrlToBlob(dataUrl), type: 'image/jpeg' });
+        } catch(e) { console.warn('idb image save:', e); }
+
+        const note = {
+          timestamp,
+          text: `![${imgFilename}]`,
+          type: 'image',
+          imageFile: imgFilename,
+          imageDataUrl: dataUrl, // for display
+          createdAt: Date.now(),
+        };
+        currentSession.notes.push(note);
+        saveSessions();
+        dom.emptyHint.classList.add('hidden');
+        renderNoteEntry(note);
+        dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const b64 = atob(parts[1]);
+    const arr = new Uint8Array(b64.length);
+    for (let i = 0; i < b64.length; i++) arr[i] = b64.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
   function addNote(text) {
     if (!text.trim() || !currentSession) return;
     const note = { timestamp: Date.now() - recordingStartTime, text: text.trim(), createdAt: Date.now() };
@@ -528,9 +595,18 @@
   function renderNoteEntry(note) {
     const entry = document.createElement('div');
     entry.className = 'note-entry';
-    entry.innerHTML = `
-      <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
-      <span class="note-text">${renderFormattedText(note.text)}</span>`;
+    if (note.type === 'image' && note.imageDataUrl) {
+      entry.innerHTML = `
+        <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
+        <div class="note-image">
+          <img src="${note.imageDataUrl}" alt="photo">
+          <div class="note-img-label">${formatTimestamp(note.timestamp)} 拍照</div>
+        </div>`;
+    } else {
+      entry.innerHTML = `
+        <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
+        <span class="note-text">${renderFormattedText(note.text)}</span>`;
+    }
     let startX = 0, curX = 0;
     entry.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, { passive: true });
     entry.addEventListener('touchmove', e => {
@@ -568,7 +644,18 @@
     session.notes.forEach(n => {
       const e = document.createElement('div');
       e.className = 'review-note-entry';
-      e.innerHTML = `<span class="review-timestamp">${formatTimestamp(n.timestamp)}</span><span class="review-text">${escapeHtml(n.text)}</span>`;
+      if (n.type === 'image' && n.imageFile) {
+        let imgSrc = n.imageDataUrl || '';
+        if (!imgSrc && isNative) {
+          try {
+            const b64 = NativeBridge.readFileBase64(n.imageFile);
+            if (b64) imgSrc = 'data:image/jpeg;base64,' + b64;
+          } catch(err) { console.warn('img load:', err); }
+        }
+        e.innerHTML = `<span class="review-timestamp">${formatTimestamp(n.timestamp)}</span><div class="review-note-image">${imgSrc ? `<img src="${imgSrc}" alt="photo">` : '<span style="color:var(--text-muted)">[图片]</span>'}</div>`;
+      } else {
+        e.innerHTML = `<span class="review-timestamp">${formatTimestamp(n.timestamp)}</span><span class="review-text">${renderFormattedText(n.text)}</span>`;
+      }
       dom.reviewNotes.appendChild(e);
     });
     if (dom.transcribeActionRow) {
@@ -618,14 +705,34 @@
     md += `- \u65E5\u671F: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
     md += `- \u65F6\u957F: ${formatTime(session.duration)}\n`;
     md += `- \u7B14\u8BB0\u6570: ${session.notes.length}\n\n## \u7B14\u8BB0\n\n`;
-    session.notes.forEach(n => { md += `**[${formatTimestamp(n.timestamp)}]** ${n.text}\n\n`; });
+    const imageFiles = [];
+    session.notes.forEach(n => {
+      if (n.type === 'image' && n.imageFile) {
+        md += `**[${formatTimestamp(n.timestamp)}]** 📷 (见附件 images/${n.imageFile})\n\n`;
+        imageFiles.push(n.imageFile);
+      } else {
+        md += `**[${formatTimestamp(n.timestamp)}]** ${n.text}\n\n`;
+      }
+    });
     const analysis = JSON.stringify({
       session: { title:session.title, date:new Date(session.startTime).toISOString(), duration:formatTime(session.duration) },
-      notes: session.notes.map(n => ({ t:formatTimestamp(n.timestamp), text:n.text })),
-      instructions: ['1. \u5C06\u5F55\u97F3\u8F6C\u4E3A\u5B8C\u6574transcript','2. \u4E0E\u7B14\u8BB0\u6309\u65F6\u95F4\u6233\u5BF9\u9F50','3. \u7B14\u8BB0\u662F\u91CD\u70B9\uFF0Ctranscript\u662F\u4E0A\u4E0B\u6587','\u8F93\u51FA: \u4F1A\u8BAE\u7EAA\u8981 + \u91CD\u70B9\u6807\u6CE8 + \u7B14\u8BB0\u672A\u8BB0\u4F46\u91CD\u8981\u7684\u5185\u5BB9']
+      notes: session.notes.map(n => ({
+        t: formatTimestamp(n.timestamp),
+        text: n.type === 'image' ? `[图片: ${n.imageFile}]` : n.text,
+        type: n.type || 'text',
+        imageFile: n.imageFile || null,
+      })),
+      images: imageFiles,
+      instructions: ['1. 将录音转为完整transcript','2. 与笔记按时间戳对齐','3. 笔记是重点，transcript是上下文','4. 图片附件（白板/幻灯片等）请描述关键内容并融入纪要','输出: 会议纪要 + 重点标注 + 笔记未记但重要的内容 + 图片内容解读']
     }, null, 2);
     if (isNative) {
-      const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', session.transcription || '', zipFilename);
+      // Use new method with image filenames
+      const imageList = imageFiles.join(',');
+      const size = await new Promise((resolve, reject) => {
+        const cb = 'qnZip' + Date.now();
+        window[cb] = (size) => { delete window[cb]; size > 0 ? resolve(size) : reject(new Error('ZIP build failed')); };
+        NativeBridge.buildZipAndSaveWithImages(md, analysis, session.nativeAudioFile || '', session.transcription || '', imageList, zipFilename, cb);
+      });
       return { zipFilename, fileSize: size, native: true };
     }
     const enc = new TextEncoder();
@@ -1282,6 +1389,14 @@
       dom.sendBtn.disabled = !ta.value.trim();
       autoResize();
     });
+
+    // Camera / Gallery buttons
+    const cameraInput = $('#camera-input');
+    const galleryInput = $('#gallery-input');
+    $('#camera-btn')?.addEventListener('click', () => { if (currentSession) cameraInput?.click(); });
+    $('#gallery-btn')?.addEventListener('click', () => { if (currentSession) galleryInput?.click(); });
+    cameraInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });
+    galleryInput?.addEventListener('change', e => { if (e.target.files[0]) { addImageNote(e.target.files[0]); e.target.value = ''; } });
 
     // Stop recording
     dom.stopBtn.addEventListener('click', () => {

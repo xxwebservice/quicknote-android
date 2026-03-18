@@ -287,10 +287,82 @@ public class MainActivity extends Activity {
 
         // ── Transcription (Foreground Service) ────────────────────────────
 
+        // ── Diarization model management ──────────────────────────────────
+
+        @JavascriptInterface
+        public String getDiarizationModelStatus() {
+            return whisperBridge.getDiarizationModelJson();
+        }
+
+        @JavascriptInterface
+        public void downloadDiarizationModel(String callbackFn) {
+            new Thread(() -> {
+                String error = whisperBridge.downloadDiarizationModel((fileIdx, totalFiles, fileName) -> {
+                    try {
+                        JSONObject json = new JSONObject();
+                        json.put("type", "progress");
+                        json.put("file", fileIdx);
+                        json.put("total", totalFiles);
+                        json.put("name", fileName);
+                        String js = json.toString();
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                    } catch (Exception ignored) {}
+                });
+                try {
+                    JSONObject json = new JSONObject();
+                    json.put("type", "done");
+                    json.put("result", error == null ? "ok" : error);
+                    String js = json.toString();
+                    runOnUiThread(() -> webView.evaluateJavascript(
+                        "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                } catch (Exception ignored) {}
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void deleteDiarizationModel() {
+            whisperBridge.deleteDiarizationModel();
+        }
+
+        // ── Share text/markdown file ───────────────────────────────────────
+
+        @JavascriptInterface
+        public boolean shareTextFile(String filename) {
+            try {
+                File dir  = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists()) {
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "文件不存在: " + filename, Toast.LENGTH_SHORT).show()
+                    );
+                    return false;
+                }
+                Uri contentUri = FileProvider.getUriForFile(
+                    MainActivity.this,
+                    "com.quicknote.app.fileprovider",
+                    file
+                );
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType("text/plain");
+                shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, filename.replace("_", " ").replace(".md", ""));
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser = Intent.createChooser(shareIntent, "分享文档");
+                runOnUiThread(() -> startActivity(chooser));
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        // ── Transcription (Foreground Service) ────────────────────────────
+
         @JavascriptInterface
         public void startTranscription(String audioFilename, String modelId,
                                         String language, String resultKey,
-                                        int durationSecs) {
+                                        int durationSecs, boolean diarize) {
             Intent intent = new Intent(MainActivity.this, TranscriptionService.class);
             intent.setAction(TranscriptionService.ACTION_START);
             intent.putExtra(TranscriptionService.EXTRA_AUDIO, audioFilename);
@@ -298,11 +370,20 @@ public class MainActivity extends Activity {
             intent.putExtra(TranscriptionService.EXTRA_LANG, language);
             intent.putExtra(TranscriptionService.EXTRA_KEY, resultKey);
             intent.putExtra(TranscriptionService.EXTRA_DURATION_SECS, durationSecs);
+            intent.putExtra(TranscriptionService.EXTRA_DIARIZE, diarize);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
             } else {
                 startService(intent);
             }
+        }
+
+        /** Backwards-compatible overload without diarize flag */
+        @JavascriptInterface
+        public void startTranscriptionSimple(String audioFilename, String modelId,
+                                              String language, String resultKey,
+                                              int durationSecs) {
+            startTranscription(audioFilename, modelId, language, resultKey, durationSecs, false);
         }
 
         @JavascriptInterface

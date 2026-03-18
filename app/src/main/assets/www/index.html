@@ -42,11 +42,8 @@
           <div class="title-input-wrap">
             <input type="text" id="meeting-title" class="meeting-title-input" placeholder="输入会议主题" autocomplete="off">
           </div>
-          <button id="start-btn" class="record-fab" aria-label="开始录音">
-            <span class="record-fab-inner"></span>
-          </button>
-          <span class="start-label">开始记录</span>
-          <p class="hint-text">录音 + 笔记 &middot; 完成后自动导出</p>
+          <button id="start-btn" class="start-btn">开始记录</button>
+          <p class="hint-text">点击开始后可同时记笔记</p>
         </div>
         <div id="recent-sessions" class="recent-sessions">
           <div class="section-header">
@@ -59,13 +56,7 @@
 
       <!-- Notes -->
       <div id="notes-screen" class="screen">
-        <div id="recording-bar" class="recording-bar hidden">
-          <div class="rec-indicator">
-            <span class="rec-dot"></span>
-            <span class="rec-label">REC</span>
-          </div>
-          <div class="mini-waveform" id="mini-waveform"></div>
-        </div>
+        <div id="recording-bar" class="recording-bar hidden"></div>
         <div id="title-bar" class="title-bar">
           <span id="current-title" class="current-title"></span>
         </div>

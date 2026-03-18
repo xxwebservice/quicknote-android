@@ -443,16 +443,7 @@
     dom.noteInput.value = '';
     dom.sendBtn.disabled = true;
 
-    // Show recording bar with waveform
-    if (dom.recordingBar) {
-      dom.recordingBar.classList.remove('hidden');
-      initWaveformBars();
-      startWaveformAnimation();
-    }
-
-    // Header recording state
-    const header = $('#header');
-    if (header) header.classList.add('recording');
+    // Discreet mode: no visible recording indicators
 
     navigateTo('notes-screen');
     setTimeout(() => dom.noteInput.focus(), 300);
@@ -483,13 +474,7 @@
     dom.timer.classList.add('hidden');
     dom.stopBtn.classList.add('hidden');
 
-    // Hide recording bar, stop waveform
-    if (dom.recordingBar) dom.recordingBar.classList.add('hidden');
-    stopWaveformAnimation();
-
-    // Remove header recording state
-    const header = $('#header');
-    if (header) header.classList.remove('recording');
+    // Clean up (discreet mode — nothing visible to hide)
 
     releaseWakeLock();
     if (isNative) {

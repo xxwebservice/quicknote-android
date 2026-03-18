@@ -22,15 +22,16 @@
       <div class="header-right">
         <span id="timer" class="timer hidden">00:00</span>
         <button id="stop-btn" class="stop-header-btn hidden">完成</button>
-        <button id="menu-btn" class="icon-btn" aria-label="Menu">⋮</button>
+        <button id="menu-btn" class="icon-btn" aria-label="Menu">&#8942;</button>
       </div>
     </header>
 
     <div id="menu-dropdown" class="menu-dropdown hidden">
-      <button id="menu-export"   class="menu-item">导出笔记</button>
-      <button id="menu-history"  class="menu-item">历史记录</button>
-      <button id="menu-exports"  class="menu-item">已导出文件</button>
-      <button id="menu-settings" class="menu-item">设置</button>
+      <button id="menu-history" class="menu-item">历史记录</button>
+      <button id="menu-exports" class="menu-item">已导出文件</button>
+      <button id="menu-settings" class="menu-item">
+        <span class="menu-item-icon">&#9881;</span>设置
+      </button>
     </div>
 
     <main id="main-content">
@@ -38,18 +39,33 @@
       <!-- Start -->
       <div id="start-screen" class="screen active">
         <div class="start-container">
-          <input type="text" id="meeting-title" class="meeting-title-input" placeholder="会议主题（可选）" autocomplete="off">
-          <button id="start-btn" class="start-btn">开始记录</button>
-          <p class="hint-text">点击开始后可同时录音和记笔记</p>
+          <div class="title-input-wrap">
+            <input type="text" id="meeting-title" class="meeting-title-input" placeholder="输入会议主题" autocomplete="off">
+          </div>
+          <button id="start-btn" class="record-fab" aria-label="开始录音">
+            <span class="record-fab-inner"></span>
+          </button>
+          <span class="start-label">开始记录</span>
+          <p class="hint-text">录音 + 笔记 &middot; 完成后自动导出</p>
         </div>
         <div id="recent-sessions" class="recent-sessions">
-          <h3 class="section-title">最近记录</h3>
+          <div class="section-header">
+            <h3 class="section-title">最近记录</h3>
+            <button id="view-all-btn" class="view-all-link">查看全部 &rsaquo;</button>
+          </div>
           <div id="session-list" class="session-list"></div>
         </div>
       </div>
 
       <!-- Notes -->
       <div id="notes-screen" class="screen">
+        <div id="recording-bar" class="recording-bar hidden">
+          <div class="rec-indicator">
+            <span class="rec-dot"></span>
+            <span class="rec-label">REC</span>
+          </div>
+          <div class="mini-waveform" id="mini-waveform"></div>
+        </div>
         <div id="title-bar" class="title-bar">
           <span id="current-title" class="current-title"></span>
         </div>
@@ -59,8 +75,8 @@
           </div>
           <div class="input-row">
             <div class="input-group">
-              <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="3"></textarea>
-              <button id="send-btn" class="send-btn" disabled>↑</button>
+              <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="2"></textarea>
+              <button id="send-btn" class="send-btn" disabled>&#8593;</button>
             </div>
           </div>
         </div>
@@ -68,31 +84,34 @@
 
       <!-- Review -->
       <div id="review-screen" class="screen">
-        <div class="review-container">
-          <h2 id="review-title" class="review-title"></h2>
-          <div class="review-meta">
-            <span id="review-duration"></span>
-            <span id="review-count"></span>
+        <div class="review-scroll-area">
+          <div class="review-container">
+            <h2 id="review-title" class="review-title"></h2>
+            <div class="review-meta">
+              <span id="review-duration"></span>
+              <span class="review-meta-sep">&middot;</span>
+              <span id="review-count"></span>
+            </div>
+            <div class="review-section-label">笔记</div>
+            <div id="review-notes" class="review-notes"></div>
           </div>
-          <div id="review-notes" class="review-notes"></div>
-          <div class="review-actions">
-            <button id="export-btn" class="action-btn primary">导出 ZIP</button>
-            <button id="share-btn"  class="action-btn share">分享</button>
-          </div>
-          <div class="review-actions hidden" id="transcribe-action-row" style="margin-top:10px">
+        </div>
+        <div class="review-action-bar">
+          <button id="export-btn" class="action-btn primary">导出 ZIP</button>
+          <button id="share-btn" class="action-btn outlined">分享</button>
+          <div id="transcribe-action-row" class="hidden" style="display:contents">
             <button id="transcribe-entry-btn" class="action-btn transcribe-btn">本地转录</button>
           </div>
-          <div class="review-actions" style="margin-top:10px">
-            <button id="new-btn" class="action-btn">新建记录</button>
-          </div>
-          <p class="export-hint">ZIP包含录音 + 笔记 + Claude指引（已转录则同时包含文字稿）</p>
+        </div>
+        <div class="review-footer">
+          <button id="new-btn" class="new-record-link">新建记录</button>
         </div>
       </div>
 
       <!-- History -->
       <div id="history-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-btn" class="icon-btn">←</button>
+          <button id="back-btn" class="icon-btn">&larr;</button>
           <h2>历史记录</h2>
         </div>
         <div class="list-screen-body">
@@ -103,7 +122,7 @@
       <!-- Exports -->
       <div id="exports-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-exports" class="icon-btn">←</button>
+          <button id="back-from-exports" class="icon-btn">&larr;</button>
           <h2>已导出文件</h2>
         </div>
         <div class="list-screen-body">
@@ -114,20 +133,78 @@
       <!-- Settings -->
       <div id="settings-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-settings" class="icon-btn">←</button>
+          <button id="back-from-settings" class="icon-btn">&larr;</button>
           <h2>设置</h2>
         </div>
         <div class="list-screen-body">
-          <p class="section-title" style="margin-bottom:6px">本地转录模型</p>
+
+          <!-- General settings -->
+          <p class="section-title" style="margin-bottom:8px">录音设置</p>
+
+          <div class="settings-group">
+            <div class="settings-item">
+              <div class="settings-item-label">
+                <span>录音质量</span>
+              </div>
+              <select id="setting-audio-quality" class="settings-select">
+                <option value="44100">标准 44.1kHz</option>
+                <option value="48000">高质量 48kHz</option>
+              </select>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-label">
+                <span>自动停止录音</span>
+              </div>
+              <select id="setting-auto-stop" class="settings-select">
+                <option value="0">关闭</option>
+                <option value="30">30 分钟</option>
+                <option value="60">60 分钟</option>
+                <option value="120">120 分钟</option>
+              </select>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-label">
+                <span>导出格式</span>
+              </div>
+              <select id="setting-export-format" class="settings-select">
+                <option value="zip">ZIP 包含全部</option>
+                <option value="text">仅笔记文本</option>
+              </select>
+            </div>
+          </div>
+
+          <p class="section-title" style="margin-top:24px;margin-bottom:8px">存储</p>
+          <div class="settings-group">
+            <div class="settings-item">
+              <div class="settings-item-label">
+                <span>存储位置</span>
+                <span class="settings-hint-text" id="storage-path-display">加载中...</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="section-title" style="margin-top:24px;margin-bottom:8px">本地转录模型</p>
           <p class="settings-hint">模型存储在本机，下载后无需网络即可转录。每个模型只需下载一次。</p>
           <div id="settings-model-list" style="margin-top:12px"></div>
+
+          <p class="section-title" style="margin-top:24px;margin-bottom:8px">关于</p>
+          <div class="settings-group">
+            <div class="settings-item">
+              <div class="settings-item-label">
+                <span>QuickNote</span>
+                <span class="settings-hint-text">v1.7</span>
+              </div>
+            </div>
+          </div>
+          <div style="height:40px"></div>
+
         </div>
       </div>
 
       <!-- Transcription -->
       <div id="transcription-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-transcription" class="icon-btn">←</button>
+          <button id="back-from-transcription" class="icon-btn">&larr;</button>
           <h2>本地转录</h2>
         </div>
         <div class="list-screen-body">
@@ -175,7 +252,7 @@
             </div>
             <div id="transcript-text" class="transcript-text"></div>
             <div class="merge-action-row">
-              <button id="merge-notes-btn" class="action-btn merge-btn">📋 融合笔记</button>
+              <button id="merge-notes-btn" class="action-btn merge-btn">&#128203; 融合笔记</button>
               <button id="share-merged-btn" class="action-btn merge-share-btn hidden">分享文档</button>
             </div>
           </div>

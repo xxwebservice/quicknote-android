@@ -78,6 +78,19 @@ public class MainActivity extends Activity {
         webView.loadUrl("file:///android_asset/www/index.html");
     }
 
+    /** Helper: send a byte-progress JSON event to JS via the given callback function name. */
+    private void sendByteProgress(String callbackFn, long downloaded, long total) {
+        try {
+            JSONObject json = new JSONObject();
+            json.put("type", "bytes");
+            json.put("downloaded", downloaded);
+            json.put("total", total);
+            String js = json.toString();
+            runOnUiThread(() -> webView.evaluateJavascript(
+                "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+        } catch (Exception ignored) {}
+    }
+
     private class NativeBridge {
 
         // ── Storage path ──────────────────────────────────────────────────
@@ -257,18 +270,21 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void downloadWhisperModel(String modelId, String callbackFn) {
             new Thread(() -> {
-                String error = whisperBridge.downloadModel(modelId, (fileIdx, totalFiles, fileName) -> {
-                    try {
-                        JSONObject json = new JSONObject();
-                        json.put("type", "progress");
-                        json.put("file", fileIdx);
-                        json.put("total", totalFiles);
-                        json.put("name", fileName);
-                        String js = json.toString();
-                        runOnUiThread(() -> webView.evaluateJavascript(
-                            "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
-                    } catch (Exception ignored) {}
-                });
+                String error = whisperBridge.downloadModel(modelId,
+                    (fileIdx, totalFiles, fileName) -> {
+                        try {
+                            JSONObject json = new JSONObject();
+                            json.put("type", "progress");
+                            json.put("file", fileIdx);
+                            json.put("total", totalFiles);
+                            json.put("name", fileName);
+                            String js = json.toString();
+                            runOnUiThread(() -> webView.evaluateJavascript(
+                                "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                        } catch (Exception ignored) {}
+                    },
+                    (downloaded, total) -> sendByteProgress(callbackFn, downloaded, total)
+                );
                 try {
                     JSONObject json = new JSONObject();
                     json.put("type", "done");
@@ -297,18 +313,21 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void downloadDiarizationModel(String callbackFn) {
             new Thread(() -> {
-                String error = whisperBridge.downloadDiarizationModel((fileIdx, totalFiles, fileName) -> {
-                    try {
-                        JSONObject json = new JSONObject();
-                        json.put("type", "progress");
-                        json.put("file", fileIdx);
-                        json.put("total", totalFiles);
-                        json.put("name", fileName);
-                        String js = json.toString();
-                        runOnUiThread(() -> webView.evaluateJavascript(
-                            "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
-                    } catch (Exception ignored) {}
-                });
+                String error = whisperBridge.downloadDiarizationModel(
+                    (fileIdx, totalFiles, fileName) -> {
+                        try {
+                            JSONObject json = new JSONObject();
+                            json.put("type", "progress");
+                            json.put("file", fileIdx);
+                            json.put("total", totalFiles);
+                            json.put("name", fileName);
+                            String js = json.toString();
+                            runOnUiThread(() -> webView.evaluateJavascript(
+                                "typeof window['" + callbackFn + "']==='function'&&window['" + callbackFn + "'](" + js + ")", null));
+                        } catch (Exception ignored) {}
+                    },
+                    (downloaded, total) -> sendByteProgress(callbackFn, downloaded, total)
+                );
                 try {
                     JSONObject json = new JSONObject();
                     json.put("type", "done");

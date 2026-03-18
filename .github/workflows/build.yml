@@ -21,6 +21,20 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
+    - name: Install NDK and CMake
+      run: |
+        yes | sdkmanager --install "ndk;25.2.9519653" "cmake;3.22.1" || true
+        echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+
+    - name: Download whisper.cpp source
+      run: |
+        curl -L -o whisper-cpp.tar.gz \
+          https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.7.5.tar.gz
+        mkdir -p whisper-cpp-src
+        tar xzf whisper-cpp.tar.gz -C whisper-cpp-src
+        ls whisper-cpp-src/
+        echo "WHISPER_CPP_DIR=$(pwd)/whisper-cpp-src/whisper.cpp-1.7.5" >> $GITHUB_ENV
+
     - name: Download sherpa-onnx AAR
       run: |
         mkdir -p app/libs

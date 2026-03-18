@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
     private WebView webView;
     private WhisperBridge whisperBridge;
     private static final int MIC_PERMISSION_REQUEST = 1001;
+    private static final int FILE_CHOOSER_REQUEST = 1002;
+    private ValueCallback<Uri[]> fileUploadCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +73,21 @@ public class MainActivity extends Activity {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> request.grant(request.getResources()));
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                              FileChooserParams params) {
+                if (fileUploadCallback != null) fileUploadCallback.onReceiveValue(null);
+                fileUploadCallback = callback;
+                Intent intent = params.createIntent();
+                try {
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                } catch (Exception e) {
+                    fileUploadCallback = null;
+                    return false;
+                }
+                return true;
             }
         });
 
@@ -143,6 +160,31 @@ public class MainActivity extends Activity {
             }
         }
 
+        // ── Read file as base64 (for image export) ─────────────────────────
+
+        @JavascriptInterface
+        public String readFileBase64(String filename) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists()) return "";
+                FileInputStream fis = new FileInputStream(file);
+                byte[] data = new byte[(int) file.length()];
+                fis.read(data);
+                fis.close();
+                return Base64.encodeToString(data, Base64.NO_WRAP);
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public boolean fileExists(String filename) {
+            File dir = getExternalFilesDir("QuickNote");
+            return new File(dir, filename).exists();
+        }
+
         // ── Native Recording (Foreground Service) ─────────────────────────
 
         @JavascriptInterface
@@ -171,6 +213,13 @@ public class MainActivity extends Activity {
         public void buildZipAndSave(String notesMd, String claudeJson,
                                      String audioFilename, String transcriptText,
                                      String zipFilename, String callbackFn) {
+            buildZipAndSaveWithImages(notesMd, claudeJson, audioFilename, transcriptText, "", zipFilename, callbackFn);
+        }
+
+        @JavascriptInterface
+        public void buildZipAndSaveWithImages(String notesMd, String claudeJson,
+                                     String audioFilename, String transcriptText,
+                                     String imageFilenames, String zipFilename, String callbackFn) {
             new Thread(() -> {
                 try {
                     File dir = getExternalFilesDir("QuickNote");
@@ -209,6 +258,25 @@ public class MainActivity extends Activity {
                             while ((len = fis.read(buf)) > 0) zos.write(buf, 0, len);
                             fis.close();
                             zos.closeEntry();
+                        }
+                    }
+
+                    // Include images
+                    if (imageFilenames != null && !imageFilenames.isEmpty()) {
+                        String[] imgs = imageFilenames.split(",");
+                        for (String imgName : imgs) {
+                            imgName = imgName.trim();
+                            if (imgName.isEmpty()) continue;
+                            File imgFile = new File(dir, imgName);
+                            if (imgFile.exists()) {
+                                zos.putNextEntry(new ZipEntry("images/" + imgName));
+                                FileInputStream fis = new FileInputStream(imgFile);
+                                byte[] buf = new byte[65536];
+                                int len;
+                                while ((len = fis.read(buf)) > 0) zos.write(buf, 0, len);
+                                fis.close();
+                                zos.closeEntry();
+                            }
                         }
                     }
 
@@ -436,6 +504,22 @@ public class MainActivity extends Activity {
                 new File(dir, resultKey + ".txt").delete();
             } catch (Exception ignored) {}
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == FILE_CHOOSER_REQUEST) {
+            if (fileUploadCallback != null) {
+                Uri[] results = null;
+                if (resultCode == RESULT_OK && data != null) {
+                    String dataString = data.getDataString();
+                    if (dataString != null) results = new Uri[]{ Uri.parse(dataString) };
+                }
+                fileUploadCallback.onReceiveValue(results);
+                fileUploadCallback = null;
+            }
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override

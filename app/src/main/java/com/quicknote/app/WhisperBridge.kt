@@ -25,9 +25,14 @@ import java.nio.ByteOrder
 
 class WhisperBridge(private val context: Context) {
 
-    // Java-callable functional interface for download progress
+    // Java-callable functional interface for file-level download progress
     fun interface ProgressCallback {
         fun onProgress(fileIdx: Int, totalFiles: Int, fileName: String)
+    }
+
+    // Java-callable functional interface for byte-level download progress
+    fun interface ByteProgressCallback {
+        fun onByteProgress(bytesDownloaded: Long, totalBytes: Long)
     }
 
     data class ModelDef(
@@ -106,7 +111,7 @@ class WhisperBridge(private val context: Context) {
     }
 
     /** Returns null on success, error message on failure. Blocking. */
-    fun downloadModel(modelId: String, progress: ProgressCallback): String? {
+    fun downloadModel(modelId: String, progress: ProgressCallback, byteProgress: ByteProgressCallback? = null): String? {
         val model = MODELS.find { it.id == modelId } ?: return "unknown model: $modelId"
         val dir = modelDir(modelId)
         dir.mkdirs()
@@ -120,7 +125,7 @@ class WhisperBridge(private val context: Context) {
         return try {
             files.forEachIndexed { idx, (name, url) ->
                 progress.onProgress(idx + 1, files.size, name)
-                downloadFile(url, File(dir, name))
+                downloadFile(url, File(dir, name), byteProgress)
             }
             null
         } catch (e: Exception) {
@@ -150,7 +155,7 @@ class WhisperBridge(private val context: Context) {
     }.toString()
 
     /** Returns null on success, error message on failure. Blocking. */
-    fun downloadDiarizationModel(progress: ProgressCallback): String? {
+    fun downloadDiarizationModel(progress: ProgressCallback, byteProgress: ByteProgressCallback? = null): String? {
         val dir = diarizationDir()
         dir.mkdirs()
         val files = listOf(
@@ -160,7 +165,7 @@ class WhisperBridge(private val context: Context) {
         return try {
             files.forEachIndexed { idx, (name, url) ->
                 progress.onProgress(idx + 1, files.size, name)
-                downloadFile(url, File(dir, name))
+                downloadFile(url, File(dir, name), byteProgress)
             }
             null
         } catch (e: Exception) {
@@ -314,45 +319,65 @@ class WhisperBridge(private val context: Context) {
         return "${s / 60}:${String.format("%02d", s % 60)}"
     }
 
-    private fun downloadFile(urlStr: String, dest: File) {
+    private fun downloadFile(urlStr: String, dest: File, byteProgress: ByteProgressCallback? = null) {
         if (dest.exists() && dest.length() > 100) return
-        Log.i(TAG, "Downloading: $urlStr")
+        Log.i(TAG, "Downloading: $urlStr → ${dest.name}")
 
-        // Manually follow redirects (HttpURLConnection does NOT follow cross-host redirects)
+        // Manually follow redirects — HttpURLConnection does NOT follow cross-host
+        // redirects (e.g. huggingface.co → cas-bridge.xethub.hf.co) even with
+        // instanceFollowRedirects = true.
         var currentUrl = urlStr
+        var finalCode = -1
         var conn: HttpURLConnection? = null
+
         for (hop in 0 until 10) {
-            conn = URL(currentUrl).openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = false   // we handle redirects ourselves
-            conn.connectTimeout = 30_000
-            conn.readTimeout    = 300_000
-            conn.setRequestProperty("User-Agent", "QuickNote/1.0 Android")
-            val code = conn.responseCode
-            Log.i(TAG, "  hop $hop → $code  url=${currentUrl.take(80)}")
+            val c = URL(currentUrl).openConnection() as HttpURLConnection
+            c.instanceFollowRedirects = false  // we handle redirects ourselves
+            c.connectTimeout = 30_000
+            c.readTimeout    = 300_000
+            c.setRequestProperty("User-Agent", "QuickNote/1.0 Android")
+
+            val code = c.responseCode
+            Log.i(TAG, "  hop $hop: HTTP $code  url=${currentUrl.take(120)}")
+
             if (code in 301..308) {
-                val loc = conn.getHeaderField("Location")
-                conn.disconnect()
-                if (loc.isNullOrEmpty()) throw Exception("Redirect without Location header")
+                val loc = c.getHeaderField("Location")
+                c.disconnect()
+                if (loc.isNullOrEmpty()) throw Exception("Redirect $code without Location header at hop $hop")
+                // Handle both absolute and relative redirect URLs
                 currentUrl = if (loc.startsWith("http")) loc else URL(URL(currentUrl), loc).toString()
-            } else if (code == 200) {
-                break
+                Log.i(TAG, "  hop $hop: redirecting to ${currentUrl.take(120)}")
             } else {
-                conn.disconnect()
-                throw Exception("HTTP $code for ${dest.name}")
+                // Terminal response (200, 4xx, 5xx, etc.)
+                finalCode = code
+                conn = c
+                break
             }
         }
 
-        if (conn == null || conn.responseCode != 200) {
-            throw Exception("Failed to connect after redirects for ${dest.name}")
+        if (conn == null) {
+            throw Exception("Too many redirects (10 hops) for ${dest.name}")
         }
+        if (finalCode != 200) {
+            conn.disconnect()
+            throw Exception("HTTP $finalCode for ${dest.name} at ${currentUrl.take(120)}")
+        }
+
+        val contentLength = conn.contentLength.toLong()  // -1 if unknown
+        Log.i(TAG, "  Content-Length: $contentLength bytes for ${dest.name}")
 
         val tmp = File(dest.parent, "${dest.name}.tmp")
         try {
             conn.inputStream.use { inp ->
                 FileOutputStream(tmp).use { out ->
                     val buf = ByteArray(65_536)
+                    var totalRead = 0L
                     var n: Int
-                    while (inp.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+                    while (inp.read(buf).also { n = it } != -1) {
+                        out.write(buf, 0, n)
+                        totalRead += n
+                        byteProgress?.onByteProgress(totalRead, contentLength)
+                    }
                 }
             }
             Log.i(TAG, "  saved ${tmp.length()} bytes → ${dest.name}")

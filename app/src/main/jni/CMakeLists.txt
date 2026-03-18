@@ -9,18 +9,16 @@ if(NOT WHISPER_CPP_DIR)
     message(FATAL_ERROR "WHISPER_CPP_DIR is not set. Point it at the whisper.cpp source root.")
 endif()
 
-# ── Collect ggml source files ────────────────────────────────────────────
-file(GLOB GGML_SOURCES
-    "${WHISPER_CPP_DIR}/ggml/src/ggml.c"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-alloc.c"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-backend.c"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-backend-reg.cpp"
+# ── Collect ggml source files (glob all .c/.cpp in ggml/src and subdirs) ──
+file(GLOB GGML_SOURCES_ROOT
+    "${WHISPER_CPP_DIR}/ggml/src/*.c"
+    "${WHISPER_CPP_DIR}/ggml/src/*.cpp"
+)
+file(GLOB GGML_SOURCES_CPU
     "${WHISPER_CPP_DIR}/ggml/src/ggml-cpu/*.c"
     "${WHISPER_CPP_DIR}/ggml/src/ggml-cpu/*.cpp"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-threading.cpp"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-quants.c"
-    "${WHISPER_CPP_DIR}/ggml/src/ggml-opt.cpp"
 )
+set(GGML_SOURCES ${GGML_SOURCES_ROOT} ${GGML_SOURCES_CPU})
 
 # ── Build shared library ────────────────────────────────────────────────
 add_library(whisper_jni SHARED

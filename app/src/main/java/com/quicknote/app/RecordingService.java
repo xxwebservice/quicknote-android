@@ -6,9 +6,11 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.util.Log;
 
 import java.io.File;
@@ -18,6 +20,12 @@ import java.io.IOException;
  * Foreground Service that handles audio recording.
  * Survives screen lock, app switching, and low-memory situations.
  * Writes audio directly to getExternalFilesDir("QuickNote") as .m4a (AAC).
+ *
+ * Background survival strategy:
+ * - START_STICKY: Android restarts us if killed
+ * - PARTIAL_WAKE_LOCK: prevents CPU sleep during recording
+ * - IMPORTANCE_DEFAULT notification: system treats service as important
+ * - Foreground service type "microphone": granted special protection on Android 10+
  */
 public class RecordingService extends Service {
 
@@ -28,11 +36,12 @@ public class RecordingService extends Service {
     static final int    NOTIF_ID     = 101;
     private static final String TAG  = "RecordingService";
 
-    private MediaRecorder recorder;
+    private MediaRecorder       recorder;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) return START_NOT_STICKY;
+        if (intent == null) return START_STICKY;
         if (ACTION_START.equals(intent.getAction())) {
             startRecording(intent.getStringExtra(EXTRA_FILE));
         } else if (ACTION_STOP.equals(intent.getAction())) {
@@ -68,8 +77,21 @@ public class RecordingService extends Service {
             return;
         }
 
+        // PARTIAL_WAKE_LOCK: keeps CPU awake even with screen off
+        // Critical for reliable recording on aggressive OEM ROMs (Honor/EMUI, MIUI, etc.)
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null) {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "QuickNote::Recording");
+            wakeLock.acquire(4 * 60 * 60 * 1000L); // max 4 hours
+        }
+
         createChannel();
-        startForeground(NOTIF_ID, buildNotification());
+        Notification notif = buildNotification();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+        } else {
+            startForeground(NOTIF_ID, notif);
+        }
         Log.i(TAG, "Recording started → " + outputPath);
     }
 
@@ -79,6 +101,10 @@ public class RecordingService extends Service {
             recorder.release();
             recorder = null;
         }
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+            wakeLock = null;
+        }
         stopForeground(true);
         stopSelf();
         Log.i(TAG, "Recording stopped");
@@ -86,10 +112,12 @@ public class RecordingService extends Service {
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // IMPORTANCE_DEFAULT (not LOW): system less likely to deprioritize/kill this service
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "录音", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "录音", NotificationManager.IMPORTANCE_DEFAULT);
             ch.setDescription("QuickNote 后台录音");
             ch.setSound(null, null);
+            ch.enableVibration(false);
             ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
         }
     }
@@ -114,11 +142,14 @@ public class RecordingService extends Service {
 
     @Override
     public void onDestroy() {
-        // Safety net: if service killed unexpectedly, stop recorder cleanly
         if (recorder != null) {
             try { recorder.stop(); } catch (RuntimeException ignored) {}
             recorder.release();
             recorder = null;
+        }
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+            wakeLock = null;
         }
         super.onDestroy();
     }

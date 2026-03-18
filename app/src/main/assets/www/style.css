@@ -154,8 +154,8 @@ header {
 .input-group { display: flex; gap: 8px; align-items: flex-end; }
 .note-input {
   flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius);
-  font-size: 15px; font-family: inherit; color: var(--text); background: var(--bg-secondary);
-  outline: none; resize: none; max-height: 120px; min-height: 44px; line-height: 1.4;
+  font-size: 16px; font-family: inherit; color: var(--text); background: var(--bg-secondary);
+  outline: none; resize: none; max-height: 200px; min-height: 80px; line-height: 1.5;
 }
 .note-input:focus { border-color: var(--accent); background: var(--bg); }
 .note-input::placeholder { color: var(--text-muted); }

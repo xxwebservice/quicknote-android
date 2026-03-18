@@ -259,37 +259,6 @@ public class MainActivity extends Activity {
             } catch (Exception e) { e.printStackTrace(); }
         }
 
-        // ── Save image to system gallery ────────────────────────────────
-
-        private void saveToSystemGallery(File imageFile, String displayName) {
-            try {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Images.Media.DISPLAY_NAME, displayName);
-                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/QuickNote");
-                    values.put(MediaStore.Images.Media.IS_PENDING, 1);
-                }
-                Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-                if (uri != null) {
-                    OutputStream os = getContentResolver().openOutputStream(uri);
-                    if (os != null) {
-                        FileInputStream fis = new FileInputStream(imageFile);
-                        byte[] buf = new byte[65536];
-                        int len;
-                        while ((len = fis.read(buf)) > 0) os.write(buf, 0, len);
-                        fis.close();
-                        os.close();
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        values.clear();
-                        values.put(MediaStore.Images.Media.IS_PENDING, 0);
-                        getContentResolver().update(uri, values, null, null);
-                    }
-                }
-            } catch (Exception e) { e.printStackTrace(); }
-        }
-
         // ── Camera capture ──────────────────────────────────────────────
 
         @JavascriptInterface
@@ -613,6 +582,62 @@ public class MainActivity extends Activity {
                 new File(dir, resultKey + ".txt").delete();
             } catch (Exception ignored) {}
         }
+
+        // ── Backup & Restore ────────────────────────────────────────────
+
+        @JavascriptInterface
+        public boolean saveBackup(String jsonData) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                if (dir != null && !dir.exists()) dir.mkdirs();
+                File backup = new File(dir, "quicknote_backup.json");
+                FileOutputStream fos = new FileOutputStream(backup);
+                fos.write(jsonData.getBytes("UTF-8"));
+                fos.close();
+                runOnUiThread(() ->
+                    Toast.makeText(MainActivity.this, "备份已保存", Toast.LENGTH_SHORT).show());
+                return true;
+            } catch (Exception e) { e.printStackTrace(); return false; }
+        }
+
+        @JavascriptInterface
+        public String loadBackup() {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File backup = new File(dir, "quicknote_backup.json");
+                if (!backup.exists()) return "";
+                FileInputStream fis = new FileInputStream(backup);
+                byte[] data = new byte[(int) backup.length()];
+                fis.read(data);
+                fis.close();
+                return new String(data, "UTF-8");
+            } catch (Exception e) { e.printStackTrace(); return ""; }
+        }
+
+        // ── Debug Log ───────────────────────────────────────────────────
+
+        @JavascriptInterface
+        public void debugLog(String tag, String message) {
+            android.util.Log.i("QN_" + tag, message);
+        }
+
+        @JavascriptInterface
+        public String getDebugInfo() {
+            try {
+                JSONObject info = new JSONObject();
+                info.put("versionName", "2.4");
+                info.put("versionCode", 24);
+                info.put("sdk", Build.VERSION.SDK_INT);
+                info.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                info.put("abi", Build.SUPPORTED_ABIS[0]);
+                File dir = getExternalFilesDir("QuickNote");
+                if (dir != null) {
+                    info.put("storagePath", dir.getAbsolutePath());
+                    info.put("storageFree", dir.getFreeSpace() / 1024 / 1024 + "MB");
+                }
+                return info.toString();
+            } catch (Exception e) { return "{}"; }
+        }
     }
 
     @Override
@@ -691,6 +716,35 @@ public class MainActivity extends Activity {
             }
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private void saveToSystemGallery(File imageFile, String displayName) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, displayName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/QuickNote");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                OutputStream os = getContentResolver().openOutputStream(uri);
+                if (os != null) {
+                    FileInputStream fis = new FileInputStream(imageFile);
+                    byte[] buf = new byte[65536];
+                    int len;
+                    while ((len = fis.read(buf)) > 0) os.write(buf, 0, len);
+                    fis.close();
+                    os.close();
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear();
+                    values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    getContentResolver().update(uri, values, null, null);
+                }
+            }
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
     @Override

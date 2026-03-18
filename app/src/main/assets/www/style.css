@@ -63,7 +63,7 @@ header {
 .menu-item:active { background: var(--bg-secondary); }
 
 /* === Screens === */
-.screen { display: none; flex: 1; overflow: hidden; }
+.screen { display: none; flex: 1; overflow: hidden; min-height: 0; }
 .screen.active { display: flex; flex-direction: column; }
 
 /* === Start Screen === */
@@ -130,8 +130,9 @@ header {
 }
 .list-screen-header h2 { font-size: 18px; font-weight: 600; }
 .list-screen-body {
-  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  flex: 1; min-height: 0; overflow-y: scroll; -webkit-overflow-scrolling: touch;
   padding: 16px 16px 40px;
+  overscroll-behavior: contain;
 }
 
 /* === Notes Screen === */

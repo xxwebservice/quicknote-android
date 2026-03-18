@@ -479,6 +479,24 @@
 
   // --- Recording ---
   async function startRecording() {
+    // Guard: if a recording is already in progress, save it first
+    if (currentSession && recordingStartTime) {
+      currentSession.duration = Date.now() - recordingStartTime;
+      const snapshot = JSON.parse(JSON.stringify(currentSession));
+      delete snapshot.imageDataUrl; // strip large data
+      snapshot.notes = snapshot.notes.map(n => { const { imageDataUrl, ...rest } = n; return rest; });
+      sessions.push(snapshot);
+      saveSessions();
+      stopAutoSave();
+      clearInterval(timerInterval);
+      clearTimeout(autoStopTimer);
+      if (isNative) NativeBridge.stopNativeRecording();
+      else if (mediaRecorder && mediaRecorder.state !== 'inactive') { try { mediaRecorder.stop(); } catch(e) {} }
+      mediaRecorder = null; audioChunks = [];
+      recordingStartTime = null;
+    }
+    clearActiveSession();
+
     const id = generateId();
     const settings = loadSettings();
     const sampleRate = parseInt(settings.audioQuality) || 44100;
@@ -507,14 +525,25 @@
         audioChunks = [];
         mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+        // Capture session reference NOW so async onstop doesn't use a replaced currentSession
+        const sessionRef = currentSession;
         mediaRecorder.onstop = async () => {
           stream.getTracks().forEach(t => t.stop());
           if (audioChunks.length) {
             const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-            await saveAudio(currentSession.id, blob);
-            currentSession.hasAudio = true;
+            await saveAudio(sessionRef.id, blob);
+            sessionRef.hasAudio = true;
           }
-          finishRecording();
+          // Only call finishRecording if this session is still the current one
+          if (currentSession && currentSession.id === sessionRef.id) {
+            finishRecording();
+          } else {
+            // Session was replaced (user started new recording) — save orphaned session
+            if (!sessions.find(s => s.id === sessionRef.id)) {
+              sessions.push(JSON.parse(JSON.stringify(sessionRef)));
+              saveSessions();
+            }
+          }
         };
         mediaRecorder.start(1000);
       } catch (err) {
@@ -584,10 +613,23 @@
   function finishRecording() {
     stopAutoSave();
     recordingStartTime = null;
-    sessions.push(currentSession);
+    // Deep copy to prevent reference sharing between sessions
+    const finishedSession = JSON.parse(JSON.stringify({
+      ...currentSession,
+      notes: currentSession.notes.map(n => { const { imageDataUrl, ...rest } = n; return rest; }),
+    }));
+    // Avoid duplicate: check if already in sessions array
+    if (!sessions.find(s => s.id === finishedSession.id)) {
+      sessions.push(finishedSession);
+    } else {
+      // Update existing entry in place
+      const idx = sessions.findIndex(s => s.id === finishedSession.id);
+      if (idx >= 0) sessions[idx] = finishedSession;
+    }
     saveSessions();
-    clearActiveSession(); // clean up recovery data
-    openReview(currentSession);
+    clearActiveSession();
+    openReview(finishedSession);
+    currentSession = null; // prevent accidental reuse
     mediaRecorder = null; audioChunks = [];
     renderSessionList(dom.sessionList, false, 5);
   }

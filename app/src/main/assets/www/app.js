@@ -1,4 +1,4 @@
-// === QuickNote v4 ===
+// === QuickNote v5 ===
 
 (function () {
   'use strict';
@@ -17,8 +17,7 @@
     });
   }
 
-  // Helper: wrap NativeBridge.buildZipAndSave in a Promise
-  // transcriptText is optional — included in ZIP when non-empty (Case A)
+  // Wrap NativeBridge.buildZipAndSave in a Promise
   function nativeBuildZip(notesMd, claudeJson, audioFilename, transcriptText, zipFilename) {
     return new Promise((resolve, reject) => {
       const cb = 'qnZip' + Date.now();
@@ -37,11 +36,12 @@
 
   // Transcription state
   let selectedModelId      = null;
-  let transcriptionKey     = null; // poll key while service runs
-  let transcriptionPoll    = null; // setInterval handle
-  let progressTimer        = null; // setInterval for progress bar
+  let transcriptionKey     = null;
+  let transcriptionPoll    = null;
+  let progressTimer        = null;
   let progressStartMs      = 0;
   let progressEstimatedMs  = 120000;
+  let mergedDocFilename    = null; // last saved merged doc for sharing
 
   const dom = {
     statusDot:      $('#status-dot'),
@@ -79,7 +79,7 @@
     backFromExports:  $('#back-from-exports'),
     exportsList:      $('#exports-list'),
     backFromSettings: $('#back-from-settings'),
-    settingsModelList: $('#settings-model-list'),
+    settingsModelList:$('#settings-model-list'),
     // Transcription
     transcribeActionRow:      $('#transcribe-action-row'),
     transcribeEntryBtn:       $('#transcribe-entry-btn'),
@@ -89,6 +89,8 @@
     transcriptionHasModel:    $('#transcription-has-model'),
     transcriptionModelSelect: $('#transcription-model-select'),
     whisperLangSelect:        $('#whisper-lang-select'),
+    diarizeToggleRow:         $('#diarize-toggle-row'),
+    diarizeToggle:            $('#diarize-toggle'),
     transcribeBtn:            $('#transcribe-btn'),
     cancelTranscribeBtn:      $('#cancel-transcribe-btn'),
     transcriptionProgressWrap:$('#transcription-progress-wrap'),
@@ -97,6 +99,8 @@
     transcriptionResult:      $('#transcription-result'),
     transcriptText:           $('#transcript-text'),
     copyTranscriptBtn:        $('#copy-transcript-btn'),
+    mergeNotesBtn:            $('#merge-notes-btn'),
+    shareMergedBtn:           $('#share-merged-btn'),
     goToSettingsBtn:          $('#go-to-settings-btn'),
   };
 
@@ -107,6 +111,10 @@
   }
   function formatTimestamp(ms) {
     const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2,'0')}`;
+  }
+  function formatTimestampSecs(secs) {
+    const s = Math.floor(secs);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2,'0')}`;
   }
   function formatDate(ts) {
@@ -149,17 +157,12 @@
       req.onerror = () => reject(req.error);
     });
   }
-
   function openAudioDB() {
     return openDB('quicknote_audio', 1, e => e.target.result.createObjectStore('audio', { keyPath: 'id' }));
   }
-
   function openExportsDB() {
-    return openDB('quicknote_exports', 1, e => {
-      e.target.result.createObjectStore('exports', { keyPath: 'id' });
-    });
+    return openDB('quicknote_exports', 1, e => e.target.result.createObjectStore('exports', { keyPath: 'id' }));
   }
-
   async function idbPut(db, store, obj) {
     return new Promise((res, rej) => {
       const tx = db.transaction(store, 'readwrite');
@@ -167,7 +170,6 @@
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
   }
-
   async function idbGet(db, store, key) {
     return new Promise((res, rej) => {
       const tx = db.transaction(store, 'readonly');
@@ -175,7 +177,6 @@
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
   }
-
   async function idbGetAll(db, store) {
     return new Promise((res, rej) => {
       const tx = db.transaction(store, 'readonly');
@@ -183,7 +184,6 @@
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
   }
-
   async function idbDelete(db, store, key) {
     return new Promise((res, rej) => {
       const tx = db.transaction(store, 'readwrite');
@@ -191,21 +191,9 @@
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
   }
-
-  async function saveAudio(id, blob) {
-    const db = await openAudioDB();
-    return idbPut(db, 'audio', { id, blob, type: blob.type });
-  }
-
-  async function getAudio(id) {
-    const db = await openAudioDB();
-    return idbGet(db, 'audio', id);
-  }
-
-  async function deleteAudio(id) {
-    const db = await openAudioDB();
-    return idbDelete(db, 'audio', id);
-  }
+  async function saveAudio(id, blob) { const db = await openAudioDB(); return idbPut(db, 'audio', { id, blob, type: blob.type }); }
+  async function getAudio(id) { const db = await openAudioDB(); return idbGet(db, 'audio', id); }
+  async function deleteAudio(id) { const db = await openAudioDB(); return idbDelete(db, 'audio', id); }
 
   // --- Screens ---
   function showScreen(id) {
@@ -218,10 +206,7 @@
   function renderSessionList(container, showDelete) {
     container.innerHTML = '';
     const sorted = [...sessions].sort((a,b) => b.startTime - a.startTime);
-    if (!sorted.length) {
-      container.innerHTML = '<p class="empty-list-hint">暂无记录</p>';
-      return;
-    }
+    if (!sorted.length) { container.innerHTML = '<p class="empty-list-hint">暂无记录</p>'; return; }
     sorted.forEach(s => {
       const card = document.createElement('div');
       card.className = 'session-card';
@@ -262,13 +247,11 @@
     };
 
     if (isNative) {
-      // ── Native path: Foreground Service records directly to disk ──────
       const audioFilename = id + '_recording.m4a';
       NativeBridge.startNativeRecording(audioFilename);
       currentSession.nativeAudioFile = audioFilename;
       currentSession.hasAudio = true;
     } else {
-      // ── Web path: MediaRecorder in JS ─────────────────────────────────
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
@@ -326,7 +309,7 @@
       NativeBridge.stopNativeRecording();
       finishRecording();
     } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop(); // onstop callback calls finishRecording
+      mediaRecorder.stop();
     } else {
       finishRecording();
     }
@@ -399,7 +382,6 @@
       e.innerHTML = `<span class="review-timestamp">${formatTimestamp(n.timestamp)}</span><span class="review-text">${escapeHtml(n.text)}</span>`;
       dom.reviewNotes.appendChild(e);
     });
-    // Show transcribe button only for native sessions with audio
     if (dom.transcribeActionRow) {
       const showTranscribe = isNative && !!session.nativeAudioFile;
       dom.transcribeActionRow.classList.toggle('hidden', !showTranscribe);
@@ -411,7 +393,7 @@
     showScreen('review-screen');
   }
 
-  // --- ZIP builder (no external deps) ---
+  // --- ZIP builder ---
   function buildZip(files) {
     const enc = new TextEncoder();
     function u16(n) { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0,n,true); return b; }
@@ -421,7 +403,6 @@
       let c=0xFFFFFFFF; for(let i=0;i<data.length;i++) c=crc32.t[(c^data[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0;
     }
     function cat(arrays) { const n=arrays.reduce((s,a)=>s+a.length,0); const o=new Uint8Array(n); let p=0; for(const a of arrays){o.set(a,p);p+=a.length;} return o; }
-
     const parts=[], cd=[]; let off=0;
     for (const f of files) {
       const nb=enc.encode(f.name), crc=crc32(f.data);
@@ -438,31 +419,23 @@
     return cat(parts);
   }
 
-  // --- Build ZIP for a session ---
   async function buildSessionZip(session) {
     const prefix = sanitizeFilename(session.title);
     const zipFilename = `${prefix}_quicknote.zip`;
-
     let md = `# ${session.title||'未命名会议'}\n\n`;
     md += `- 日期: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
     md += `- 时长: ${formatTime(session.duration)}\n`;
     md += `- 笔记数: ${session.notes.length}\n\n## 笔记\n\n`;
     session.notes.forEach(n => { md += `**[${formatTimestamp(n.timestamp)}]** ${n.text}\n\n`; });
-
     const analysis = JSON.stringify({
       session: { title:session.title, date:new Date(session.startTime).toISOString(), duration:formatTime(session.duration) },
       notes: session.notes.map(n => ({ t:formatTimestamp(n.timestamp), text:n.text })),
       instructions: ['1. 将录音转为完整transcript','2. 与笔记按时间戳对齐','3. 笔记是重点，transcript是上下文','输出: 会议纪要 + 重点标注 + 笔记未记但重要的内容']
     }, null, 2);
-
     if (isNative) {
-      // Java builds ZIP: streams audio from disk, no base64 overhead
-      // Pass transcript if available (Case A); empty string = skip (Case B)
       const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', session.transcription || '', zipFilename);
       return { zipFilename, fileSize: size, native: true };
     }
-
-    // Web path
     const enc = new TextEncoder();
     const files = [
       { name: `${prefix}_notes.md`, data: enc.encode(md) },
@@ -480,7 +453,6 @@
     return { blob: new Blob([zip], { type:'application/zip' }), zipFilename, fileCount: files.length };
   }
 
-  // --- Export (save to device) ---
   async function exportSession() {
     if (!currentSession) return;
     showToast('正在打包...', 60000);
@@ -501,20 +473,17 @@
     }
   }
 
-  // --- Share ---
   async function shareSession() {
     if (!currentSession) return;
     showToast('正在打包...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
-
       if (result.native) {
         await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
         NativeBridge.shareFile(result.zipFilename);
         return;
       }
-
       await saveExport(currentSession, result.blob, result.zipFilename);
       if (navigator.canShare && navigator.canShare({ files: [new File([result.blob], result.zipFilename, { type:'application/zip' })] })) {
         const file = new File([result.blob], result.zipFilename, { type:'application/zip' });
@@ -531,7 +500,6 @@
     }
   }
 
-  // --- Save export record (native: no blob, just filename reference) ---
   async function saveExportRecord(session, filename, fileSize) {
     try {
       const db = await openExportsDB();
@@ -544,23 +512,17 @@
     } catch(e) { console.warn('Could not save export record:', e); }
   }
 
-  // --- Save export to IndexedDB (web: stores blob) ---
   async function saveExport(session, blob, filename) {
     try {
       const db = await openExportsDB();
       await idbPut(db, 'exports', {
-        id: generateId(),
-        sessionId: session.id,
+        id: generateId(), sessionId: session.id,
         title: session.title || '未命名会议',
-        filename,
-        blob,
-        exportedAt: Date.now(),
-        fileSize: blob.size,
+        filename, blob, exportedAt: Date.now(), fileSize: blob.size,
       });
     } catch(e) { console.warn('Could not save export:', e); }
   }
 
-  // --- Exports screen ---
   async function renderExportsList() {
     dom.exportsList.innerHTML = '<p class="empty-list-hint">加载中...</p>';
     try {
@@ -568,10 +530,7 @@
       const exports = await idbGetAll(db, 'exports');
       exports.sort((a,b) => b.exportedAt - a.exportedAt);
       dom.exportsList.innerHTML = '';
-      if (!exports.length) {
-        dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>';
-        return;
-      }
+      if (!exports.length) { dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>'; return; }
       for (const ex of exports) {
         const card = document.createElement('div');
         card.className = 'export-card';
@@ -582,19 +541,15 @@
             <span class="export-meta">${formatDate(ex.exportedAt)} · ${kb} KB</span>
           </div>
           <div class="export-actions">
-            <button class="export-action-btn share-export-btn" data-id="${ex.id}" title="分享">分享</button>
-            <button class="export-action-btn dl-export-btn" data-id="${ex.id}" title="下载">↓</button>
-            <button class="export-action-btn del-export-btn" data-id="${ex.id}" title="删除">✕</button>
+            <button class="export-action-btn share-export-btn" data-id="${ex.id}">分享</button>
+            <button class="export-action-btn dl-export-btn" data-id="${ex.id}">↓</button>
+            <button class="export-action-btn del-export-btn" data-id="${ex.id}">✕</button>
           </div>`;
-
         card.querySelector('.share-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
-          if (data.nativeFile) {
-            NativeBridge.shareFile(data.filename);
-            return;
-          }
+          if (data.nativeFile) { NativeBridge.shareFile(data.filename); return; }
           if (isNative && data.blob) {
             const b64 = await blobToBase64(data.blob);
             NativeBridge.saveFile(data.filename, b64);
@@ -609,29 +564,22 @@
             showToast('已下载（当前浏览器不支持文件分享）');
           }
         });
-
         card.querySelector('.dl-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
           if (!data) { showToast('文件已丢失'); return; }
-          if (data.nativeFile) {
-            NativeBridge.shareFile(data.filename);
-            return;
-          }
+          if (data.nativeFile) { NativeBridge.shareFile(data.filename); return; }
           await downloadBlob(data.blob, data.filename);
-          if (!isNative) showToast('重新下载中...');
         });
-
         card.querySelector('.del-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
           if (!confirm('删除此导出记录？')) return;
           const db2 = await openExportsDB();
           await idbDelete(db2, 'exports', ex.id);
           card.remove();
-          const remaining = dom.exportsList.querySelectorAll('.export-card');
-          if (!remaining.length) dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>';
+          if (!dom.exportsList.querySelectorAll('.export-card').length)
+            dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>';
         });
-
         dom.exportsList.appendChild(card);
       }
     } catch(e) {
@@ -640,22 +588,32 @@
     }
   }
 
-  // ── Settings Screen (model management) ──────────────────────────────────
+  // ── Settings Screen ────────────────────────────────────────────────────
 
   function openSettingsScreen() {
     renderSettingsModels();
     showScreen('settings-screen');
   }
 
+  /** Renders model cards (Whisper × 3 + Diarization × 1). Listener is on the container, set once in init(). */
   function renderSettingsModels() {
-    if (!isNative) return;
-    const container = $('#settings-model-list');
-    if (!container) return;
-    let models;
-    try { models = JSON.parse(NativeBridge.getWhisperModels()); } catch { models = []; }
+    const container = dom.settingsModelList;
+    if (!container || !isNative) return;
+
+    let whisperModels;
+    try { whisperModels = JSON.parse(NativeBridge.getWhisperModels()); } catch { whisperModels = []; }
+
+    let diarStatus;
+    try { diarStatus = JSON.parse(NativeBridge.getDiarizationModelStatus()); } catch { diarStatus = { downloaded: false, sizeMb: 37 }; }
+
     container.innerHTML = '';
 
-    models.forEach(m => {
+    // ── Section: Whisper 转录模型 ──────────────────────────────────────
+    const h1 = document.createElement('p');
+    h1.className = 'section-title'; h1.style.marginBottom = '8px'; h1.textContent = '语音转录模型 (Whisper)';
+    container.appendChild(h1);
+
+    whisperModels.forEach(m => {
       const card = document.createElement('div');
       card.className = 'model-card';
       card.dataset.modelId = m.id;
@@ -666,71 +624,60 @@
         </div>
         <div class="model-action-row">
           ${m.downloaded
-            ? `<button class="model-del-btn" data-action="delete" data-mid="${m.id}">删除模型</button>`
-            : `<button class="model-dl-btn" data-action="download" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>`
+            ? `<button class="model-del-btn" data-action="delete-whisper" data-mid="${m.id}">删除模型</button>`
+            : `<button class="model-dl-btn"  data-action="download-whisper" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>`
           }
         </div>
         <div class="model-dl-progress" id="dl-progress-${m.id}"></div>`;
       container.appendChild(card);
     });
 
-    // Event delegation — one listener handles all download/delete clicks
-    container.addEventListener('click', function handleModelClick(e) {
-      const btn = e.target.closest('[data-action]');
-      if (!btn) return;
-      const action = btn.dataset.action;
-      const mid    = btn.dataset.mid;
-      if (action === 'download') {
-        btn.disabled = true;
-        btn.textContent = '下载中...';
-        const progressEl = document.getElementById('dl-progress-' + mid);
-        const cb = 'qnDl' + Date.now();
-        window[cb] = function(data) {
-          if (data.type === 'progress') {
-            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
-          } else if (data.type === 'done') {
-            delete window[cb];
-            if (data.result === 'ok') {
-              showToast('模型下载完成');
-              renderSettingsModels();
-            } else {
-              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
-              btn.disabled = false;
-              btn.textContent = '重试下载';
-            }
-          }
-        };
-        NativeBridge.downloadWhisperModel(mid, cb);
-      } else if (action === 'delete') {
-        if (!confirm('确定删除此模型？需要时可重新下载。')) return;
-        NativeBridge.deleteWhisperModel(mid);
-        showToast('模型已删除');
-        renderSettingsModels();
-      }
-    }, { once: false });
+    // ── Section: 说话人识别模型 ───────────────────────────────────────
+    const h2 = document.createElement('p');
+    h2.className = 'section-title'; h2.style.cssText = 'margin-top:20px;margin-bottom:8px'; h2.textContent = '说话人识别模型';
+    container.appendChild(h2);
+
+    const hint = document.createElement('p');
+    hint.className = 'settings-hint'; hint.style.marginBottom = '12px';
+    hint.textContent = '转录时自动区分不同说话人（A/B/C...）。需配合Whisper模型使用，约37MB。';
+    container.appendChild(hint);
+
+    const dc = document.createElement('div');
+    dc.className = 'model-card';
+    dc.innerHTML = `
+      <div class="model-card-header">
+        <span class="model-card-name">说话人识别 · ~37MB</span>
+        <span class="model-badge ${diarStatus.downloaded ? 'downloaded' : ''}">${diarStatus.downloaded ? '✓ 已下载' : '未下载'}</span>
+      </div>
+      <div class="model-action-row">
+        ${diarStatus.downloaded
+          ? `<button class="model-del-btn" data-action="delete-diarize">删除模型</button>`
+          : `<button class="model-dl-btn"  data-action="download-diarize">下载 (~37MB)</button>`
+        }
+      </div>
+      <div class="model-dl-progress" id="dl-progress-diarization"></div>`;
+    container.appendChild(dc);
   }
 
-  // ── Transcription (local Whisper) ────────────────────────────────────────
+  // ── Transcription ──────────────────────────────────────────────────────
 
   function openTranscriptionScreen() {
     if (!isNative || !currentSession) return;
-
-    // Reset UI
+    mergedDocFilename = null;
     dom.transcribeBtn.disabled = true;
     dom.transcribeBtn.textContent = '开始转录';
     dom.cancelTranscribeBtn.style.display = 'none';
     dom.transcriptionProgressWrap.classList.add('hidden');
     dom.transcriptionStatus.textContent = '';
 
-    // Restore existing transcript
     if (currentSession.transcription) {
       dom.transcriptionResult.classList.remove('hidden');
       dom.transcriptText.textContent = currentSession.transcription;
+      dom.shareMergedBtn.classList.add('hidden');
     } else {
       dom.transcriptionResult.classList.add('hidden');
     }
 
-    // Restore in-progress state (if user navigated away during transcription)
     if (transcriptionKey) {
       dom.transcriptionProgressWrap.classList.remove('hidden');
       dom.cancelTranscribeBtn.style.display = '';
@@ -758,22 +705,24 @@
     dom.transcriptionNoModel.classList.add('hidden');
     dom.transcriptionHasModel.classList.remove('hidden');
 
-    // Fill select
     dom.transcriptionModelSelect.innerHTML = '';
     downloaded.forEach(m => {
       const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.name;
+      opt.value = m.id; opt.textContent = m.name;
       dom.transcriptionModelSelect.appendChild(opt);
     });
 
-    // Restore previously selected model if still available
     if (selectedModelId && downloaded.some(m => m.id === selectedModelId)) {
       dom.transcriptionModelSelect.value = selectedModelId;
     } else {
       selectedModelId = downloaded[0].id;
       dom.transcriptionModelSelect.value = selectedModelId;
     }
+
+    // Show diarization toggle only if diarization model is downloaded
+    let diarStatus;
+    try { diarStatus = JSON.parse(NativeBridge.getDiarizationModelStatus()); } catch { diarStatus = { downloaded: false }; }
+    dom.diarizeToggleRow.classList.toggle('hidden', !diarStatus.downloaded);
 
     dom.transcribeBtn.disabled = !!transcriptionKey;
   }
@@ -785,8 +734,9 @@
 
     const key          = 'tr_' + Date.now();
     const lang         = dom.whisperLangSelect.value;
+    const diarize      = dom.diarizeToggle?.checked || false;
     const durationSecs = Math.floor((currentSession.duration || 0) / 1000);
-    const estimatedMs  = getTranscriptEstimatedMs(selectedModelId, durationSecs);
+    const estimatedMs  = getTranscriptEstimatedMs(selectedModelId, durationSecs, diarize);
 
     transcriptionKey = key;
     dom.transcribeBtn.disabled = true;
@@ -794,23 +744,23 @@
     dom.cancelTranscribeBtn.style.display = '';
     dom.transcriptionProgressWrap.classList.remove('hidden');
     dom.transcriptionResult.classList.add('hidden');
+    dom.shareMergedBtn.classList.add('hidden');
+    mergedDocFilename = null;
 
-    startProgressBar(estimatedMs);
+    startProgressBar(estimatedMs, diarize);
 
-    NativeBridge.startTranscription(audioFilename, selectedModelId, lang, key, durationSecs);
+    // New 6-param version: audioFilename, modelId, language, resultKey, durationSecs, diarize
+    NativeBridge.startTranscription(audioFilename, selectedModelId, lang, key, durationSecs, diarize);
 
-    // Poll for result every 3 seconds
     transcriptionPoll = setInterval(pollTranscription, 3000);
   }
 
   function pollTranscription() {
     if (!transcriptionKey || !isNative) return;
     const result = NativeBridge.checkTranscriptionResult(transcriptionKey);
-    if (!result) return; // not ready yet
+    if (!result) return;
 
-    // Result arrived
-    clearInterval(transcriptionPoll);
-    transcriptionPoll = null;
+    clearInterval(transcriptionPoll); transcriptionPoll = null;
     stopProgressBar(true);
     NativeBridge.clearTranscriptionResult(transcriptionKey);
     transcriptionKey = null;
@@ -836,8 +786,7 @@
 
   function cancelTranscription() {
     if (!transcriptionKey) return;
-    clearInterval(transcriptionPoll);
-    transcriptionPoll = null;
+    clearInterval(transcriptionPoll); transcriptionPoll = null;
     NativeBridge.stopTranscription();
     NativeBridge.clearTranscriptionResult(transcriptionKey);
     transcriptionKey = null;
@@ -848,14 +797,15 @@
     dom.transcriptionStatus.textContent = '转录已取消';
   }
 
-  function getTranscriptEstimatedMs(modelId, durationSecs) {
+  function getTranscriptEstimatedMs(modelId, durationSecs, diarize) {
     const factor = modelId === 'large-v3-turbo' ? 5 : modelId === 'small' ? 10 : 20;
-    return Math.max(10, Math.ceil(durationSecs / factor)) * 1000;
+    const base = Math.max(10, Math.ceil(durationSecs / factor));
+    return (diarize ? base * 2.5 : base) * 1000;
   }
 
-  function startProgressBar(estimatedMs) {
+  function startProgressBar(estimatedMs, diarize) {
     clearInterval(progressTimer);
-    progressStartMs    = Date.now();
+    progressStartMs     = Date.now();
     progressEstimatedMs = estimatedMs;
     if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = '0%';
     progressTimer = setInterval(() => {
@@ -865,17 +815,110 @@
       const remainS  = Math.max(0, Math.ceil((progressEstimatedMs - elapsed) / 1000));
       if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = pct + '%';
       if (dom.transcriptionStatus) {
+        const phase = diarize && elapsed < progressEstimatedMs / 3 ? '分析说话人中...' : '转录中...';
         dom.transcriptionStatus.textContent = remainS > 0
-          ? `转录中... 已用时 ${elapsedS}秒，约还需 ${remainS}秒`
-          : `转录中... 已用时 ${elapsedS}秒`;
+          ? `${phase} 已用时 ${elapsedS}秒，约还需 ${remainS}秒`
+          : `${phase} 已用时 ${elapsedS}秒`;
       }
     }, 1000);
   }
 
   function stopProgressBar(success) {
-    clearInterval(progressTimer);
-    progressTimer = null;
+    clearInterval(progressTimer); progressTimer = null;
     if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = success ? '100%' : '0%';
+  }
+
+  // ── Notes Fusion ──────────────────────────────────────────────────────
+
+  /**
+   * Generates a merged document combining the transcript and hand-written notes.
+   * Sections: transcript · notes table · timeline (interleaved by timestamp)
+   */
+  function generateMergedDoc(session, transcriptText) {
+    const title    = session.title || '未命名会议';
+    const date     = new Date(session.startTime).toLocaleString('zh-CN');
+    const duration = formatTime(session.duration);
+
+    let doc = `# ${title} — 融合纪要\n\n`;
+    doc += `**日期**: ${date}  |  **时长**: ${duration}  |  **笔记**: ${session.notes.length}条\n\n---\n\n`;
+
+    // Section 1: Transcript
+    doc += `## 转录文字稿\n\n`;
+    doc += (transcriptText || '（无转录文字稿）') + '\n\n---\n\n';
+
+    // Section 2: Hand-written notes
+    doc += `## 手动笔记\n\n`;
+    if (session.notes.length) {
+      doc += `| 时间 | 内容 |\n|------|------|\n`;
+      session.notes.forEach(n => {
+        doc += `| ${formatTimestamp(n.timestamp)} | ${n.text} |\n`;
+      });
+    } else {
+      doc += '（无手动笔记）\n';
+    }
+    doc += '\n---\n\n';
+
+    // Section 3: Timeline (interleaved)
+    doc += `## 时间轴融合\n\n`;
+    doc += `> ★ = 手动笔记\n\n`;
+
+    // Parse diarized transcript lines: [说话人A 0:00-0:35] text
+    const segRegex = /^\[([^\]]+?)\s+(\d+:\d{2})-\d+:\d{2}\]\s+(.+)$/;
+    const items    = [];
+
+    if (transcriptText) {
+      transcriptText.split('\n').forEach(line => {
+        const m = line.trim().match(segRegex);
+        if (m) {
+          const [, speaker, startStr, text] = m;
+          const secs = parseTimestampStr(startStr);
+          items.push({ time: secs, type: 'seg', speaker, text });
+        } else if (line.trim() && !transcriptText.includes('[说话人')) {
+          // Plain transcript (no diarization) — add as one block at t=0
+          items.push({ time: 0, type: 'seg', speaker: null, text: line.trim() });
+        }
+      });
+    }
+
+    session.notes.forEach(n => {
+      items.push({ time: n.timestamp / 1000, type: 'note', text: n.text });
+    });
+
+    items.sort((a, b) => a.time - b.time);
+    items.forEach(item => {
+      const t = formatTimestampSecs(item.time);
+      if (item.type === 'note') {
+        doc += `**[${t}] ★ ${item.text}**\n`;
+      } else {
+        const sp = item.speaker ? `[${item.speaker}] ` : '';
+        doc += `[${t}] ${sp}${item.text}\n`;
+      }
+    });
+
+    doc += `\n---\n*由 QuickNote 生成 · ${new Date().toLocaleDateString('zh-CN')}*\n`;
+    return doc;
+  }
+
+  function parseTimestampStr(str) {
+    const parts = str.split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+
+  function mergeNotes() {
+    if (!currentSession || !isNative) return;
+    const transcript = currentSession.transcription || '';
+    const docContent = generateMergedDoc(currentSession, transcript);
+    const filename   = sanitizeFilename(currentSession.title) + '_merged.md';
+
+    NativeBridge.saveText(filename, docContent);
+    mergedDocFilename = filename;
+    dom.shareMergedBtn.classList.remove('hidden');
+    showToast('融合文档已生成');
+  }
+
+  function shareMergedDoc() {
+    if (!mergedDocFilename || !isNative) return;
+    NativeBridge.shareTextFile(mergedDocFilename);
   }
 
   // --- Download helper ---
@@ -946,7 +989,73 @@
     dom.backFromExports.addEventListener('click', () => showScreen('start-screen'));
     dom.backFromSettings?.addEventListener('click', () => showScreen('start-screen'));
 
-    // Transcription screen
+    // ── Settings model list: event delegation — registered ONCE here ───
+    // Handles ALL download/delete for both Whisper and Diarization models
+    dom.settingsModelList?.addEventListener('click', e => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn || btn.disabled) return;
+      const action = btn.dataset.action;
+      const mid    = btn.dataset.mid || '';
+
+      if (action === 'download-whisper') {
+        btn.disabled = true;
+        btn.textContent = '下载中...';
+        const progressEl = document.getElementById('dl-progress-' + mid);
+        const cb = 'qnDl' + Date.now();
+        window[cb] = function(data) {
+          if (data.type === 'progress') {
+            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+          } else if (data.type === 'done') {
+            delete window[cb];
+            if (data.result === 'ok') {
+              showToast('模型下载完成');
+              renderSettingsModels();
+            } else {
+              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
+              btn.disabled = false;
+              btn.textContent = '重试下载';
+            }
+          }
+        };
+        NativeBridge.downloadWhisperModel(mid, cb);
+
+      } else if (action === 'delete-whisper') {
+        if (!confirm('确定删除此模型？需要时可重新下载。')) return;
+        NativeBridge.deleteWhisperModel(mid);
+        showToast('模型已删除');
+        renderSettingsModels();
+
+      } else if (action === 'download-diarize') {
+        btn.disabled = true;
+        btn.textContent = '下载中...';
+        const progressEl = document.getElementById('dl-progress-diarization');
+        const cb = 'qnDl' + Date.now();
+        window[cb] = function(data) {
+          if (data.type === 'progress') {
+            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+          } else if (data.type === 'done') {
+            delete window[cb];
+            if (data.result === 'ok') {
+              showToast('说话人识别模型下载完成');
+              renderSettingsModels();
+            } else {
+              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
+              btn.disabled = false;
+              btn.textContent = '重试下载';
+            }
+          }
+        };
+        NativeBridge.downloadDiarizationModel(cb);
+
+      } else if (action === 'delete-diarize') {
+        if (!confirm('确定删除说话人识别模型？需要时可重新下载。')) return;
+        NativeBridge.deleteDiarizationModel();
+        showToast('模型已删除');
+        renderSettingsModels();
+      }
+    });
+
+    // ── Transcription screen ───────────────────────────────────────────
     if (isNative) {
       dom.transcribeEntryBtn?.addEventListener('click', openTranscriptionScreen);
       dom.backFromTranscription?.addEventListener('click', () => {
@@ -955,6 +1064,10 @@
       });
       dom.transcribeBtn?.addEventListener('click', startTranscription);
       dom.cancelTranscribeBtn?.addEventListener('click', cancelTranscription);
+      dom.transcriptionModelSelect?.addEventListener('change', () => {
+        selectedModelId = dom.transcriptionModelSelect.value;
+        dom.transcribeBtn.disabled = !!transcriptionKey;
+      });
       dom.copyTranscriptBtn?.addEventListener('click', () => {
         const text = dom.transcriptText?.textContent;
         if (!text) return;
@@ -962,11 +1075,10 @@
           navigator.clipboard.writeText(text).then(() => showToast('已复制'));
         }
       });
+      dom.mergeNotesBtn?.addEventListener('click', mergeNotes);
+      dom.shareMergedBtn?.addEventListener('click', shareMergedDoc);
       dom.goToSettingsBtn?.addEventListener('click', openSettingsScreen);
-      dom.transcriptionModelSelect?.addEventListener('change', () => {
-        selectedModelId = dom.transcriptionModelSelect.value;
-        dom.transcribeBtn.disabled = !!transcriptionKey;
-      });
+
       // Resume polling if app was backgrounded during transcription
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && transcriptionKey && !transcriptionPoll) {
@@ -980,7 +1092,6 @@
     });
   }
 
-  // Kill old service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(reg => {
       setTimeout(() => reg.unregister(), 3000);

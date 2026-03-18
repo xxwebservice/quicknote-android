@@ -13,11 +13,10 @@ import android.os.Looper;
 import android.util.Log;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 
 /**
- * Foreground Service for local Whisper transcription.
+ * Foreground Service for local Whisper transcription (with optional speaker diarization).
  * Survives screen lock / app switching. Result written to
  * getExternalFilesDir("QuickNote")/transcripts/{resultKey}.txt
  * so JS can poll with NativeBridge.checkTranscriptionResult().
@@ -31,6 +30,7 @@ public class TranscriptionService extends Service {
     static final String EXTRA_LANG          = "language";
     static final String EXTRA_KEY           = "resultKey";
     static final String EXTRA_DURATION_SECS = "durationSecs";
+    static final String EXTRA_DIARIZE       = "diarize";     // boolean
 
     private static final String CHANNEL_ID = "qn_transcription";
     private static final int    NOTIF_ID   = 102;
@@ -43,6 +43,7 @@ public class TranscriptionService extends Service {
     private long                startTime;
     private int                 estimatedSecs = 120;
     private String              pendingResultKey;
+    private boolean             diarizeMode   = false;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -62,29 +63,36 @@ public class TranscriptionService extends Service {
         String language      = intent.getStringExtra(EXTRA_LANG);
         String resultKey     = intent.getStringExtra(EXTRA_KEY);
         int    durationSecs  = intent.getIntExtra(EXTRA_DURATION_SECS, 0);
+        diarizeMode          = intent.getBooleanExtra(EXTRA_DIARIZE, false);
         pendingResultKey     = resultKey;
 
-        // Estimate wall-clock time: turbo ≈ 5×RT, small ≈ 10×RT, tiny ≈ 20×RT
+        // Estimate wall-clock time
+        // With diarization: ~2× longer (diarization pass + per-segment Whisper)
         if (durationSecs > 0) {
             int factor = "large-v3-turbo".equals(modelId) ? 5 : "small".equals(modelId) ? 10 : 20;
             estimatedSecs = Math.max(10, durationSecs / factor);
+            if (diarizeMode) estimatedSecs = (int)(estimatedSecs * 2.5);
         }
 
         createChannel();
         startTime = System.currentTimeMillis();
-        startForeground(NOTIF_ID, buildNotif("转录中", "正在初始化模型..."));
+        String initMsg = diarizeMode ? "正在分析说话人..." : "正在初始化模型...";
+        startForeground(NOTIF_ID, buildNotif(diarizeMode ? "转录+说话人识别" : "转录中", initMsg));
         startNotifUpdates();
 
         final String af = audioFilename != null ? audioFilename : "";
         final String mi = modelId       != null ? modelId       : "";
         final String lg = language      != null ? language      : "";
         final String rk = resultKey     != null ? resultKey     : "";
+        final boolean dz = diarizeMode;
 
         transThread = new Thread(() -> {
             String result;
             try {
                 WhisperBridge bridge = new WhisperBridge(this);
-                result = bridge.transcribeAudio(af, mi, lg);
+                result = dz
+                    ? bridge.transcribeWithDiarization(af, mi, lg)
+                    : bridge.transcribeAudio(af, mi, lg);
             } catch (Exception e) {
                 Log.e(TAG, "Transcription error", e);
                 result = "error: " + e.getMessage();
@@ -115,12 +123,16 @@ public class TranscriptionService extends Service {
             @Override public void run() {
                 long elapsed = (System.currentTimeMillis() - startTime) / 1000;
                 long remain  = Math.max(0, estimatedSecs - elapsed);
+                // Show appropriate phase label for diarization mode
+                String phase = diarizeMode && elapsed < estimatedSecs / 3
+                    ? "分析说话人中"
+                    : diarizeMode ? "转录中" : "转录中";
                 String detail = elapsed < estimatedSecs
-                    ? String.format("已用时 %ds，约还需 %ds", elapsed, remain)
-                    : String.format("已用时 %ds，仍处理中...", elapsed);
+                    ? String.format("%s 已用时 %ds，约还需 %ds", phase, elapsed, remain)
+                    : String.format("%s 已用时 %ds，仍处理中...", phase, elapsed);
                 NotificationManager nm =
                     (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-                nm.notify(NOTIF_ID, buildNotif("转录中", detail));
+                nm.notify(NOTIF_ID, buildNotif(diarizeMode ? "转录+说话人识别" : "转录中", detail));
                 handler.postDelayed(this, 5000);
             }
         };

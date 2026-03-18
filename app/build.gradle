@@ -17,6 +17,13 @@ android {
         ndk {
             abiFilters "arm64-v8a"
         }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17 -O3"
+                arguments "-DWHISPER_CPP_DIR=${rootProject.projectDir}/whisper-cpp-src/whisper.cpp-1.7.5"
+            }
+        }
     }
 
     buildTypes {
@@ -34,6 +41,13 @@ android {
 
     kotlinOptions {
         jvmTarget = '17'
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// === QuickNote v5 ===
+// === QuickNote v6 — UI Overhaul ===
 
 (function () {
   'use strict';
@@ -33,6 +33,8 @@
   let timerInterval = null;
   let currentSession = null;
   let sessions = [];
+  let waveformInterval = null;
+  let autoStopTimer = null;
 
   // Transcription state
   let selectedModelId      = null;
@@ -43,12 +45,14 @@
   let progressEstimatedMs  = 120000;
   let mergedDocFilename    = null; // last saved merged doc for sharing
 
+  // Download progress tracking
+  const downloadProgress = {};
+
   const dom = {
     statusDot:      $('#status-dot'),
     timer:          $('#timer'),
     menuBtn:        $('#menu-btn'),
     menuDropdown:   $('#menu-dropdown'),
-    menuExport:     $('#menu-export'),
     menuHistory:    $('#menu-history'),
     menuExports:    $('#menu-exports'),
     menuSettings:   $('#menu-settings'),
@@ -67,6 +71,8 @@
     noteInput:      $('#note-input'),
     sendBtn:        $('#send-btn'),
     stopBtn:        $('#stop-btn'),
+    recordingBar:   $('#recording-bar'),
+    miniWaveform:   $('#mini-waveform'),
     reviewTitle:    $('#review-title'),
     reviewDuration: $('#review-duration'),
     reviewCount:    $('#review-count'),
@@ -80,6 +86,12 @@
     exportsList:      $('#exports-list'),
     backFromSettings: $('#back-from-settings'),
     settingsModelList:$('#settings-model-list'),
+    viewAllBtn:     $('#view-all-btn'),
+    // Settings controls
+    settingAudioQuality:  $('#setting-audio-quality'),
+    settingAutoStop:      $('#setting-auto-stop'),
+    settingExportFormat:  $('#setting-export-format'),
+    storagePathDisplay:   $('#storage-path-display'),
     // Transcription
     transcribeActionRow:      $('#transcribe-action-row'),
     transcribeEntryBtn:       $('#transcribe-entry-btn'),
@@ -104,6 +116,50 @@
     goToSettingsBtn:          $('#go-to-settings-btn'),
   };
 
+  // --- Settings ---
+  const DEFAULT_SETTINGS = {
+    audioQuality: '44100',
+    autoStop: '0',
+    exportFormat: 'zip',
+  };
+
+  function loadSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('quicknote_settings'));
+      return { ...DEFAULT_SETTINGS, ...saved };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings(settings) {
+    localStorage.setItem('quicknote_settings', JSON.stringify(settings));
+  }
+
+  function applySettingsToUI() {
+    const s = loadSettings();
+    if (dom.settingAudioQuality) dom.settingAudioQuality.value = s.audioQuality;
+    if (dom.settingAutoStop) dom.settingAutoStop.value = s.autoStop;
+    if (dom.settingExportFormat) dom.settingExportFormat.value = s.exportFormat;
+    // Storage path
+    if (dom.storagePathDisplay) {
+      if (isNative && typeof NativeBridge.getStoragePath === 'function') {
+        try { dom.storagePathDisplay.textContent = NativeBridge.getStoragePath(); } catch { dom.storagePathDisplay.textContent = '/sdcard/QuickNote/'; }
+      } else {
+        dom.storagePathDisplay.textContent = 'IndexedDB (浏览器本地)';
+      }
+    }
+  }
+
+  function onSettingChange() {
+    const settings = {
+      audioQuality: dom.settingAudioQuality?.value || '44100',
+      autoStop: dom.settingAutoStop?.value || '0',
+      exportFormat: dom.settingExportFormat?.value || 'zip',
+    };
+    saveSettings(settings);
+  }
+
   // --- Utilities ---
   function formatTime(ms) {
     const s = Math.floor(ms / 1000);
@@ -121,6 +177,11 @@
     const d = new Date(ts);
     return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   }
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
   function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
   function sanitizeFilename(n) { return (n||'meeting').replace(/[^\w\u4e00-\u9fff-]/g,'_').substring(0,50); }
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -129,7 +190,13 @@
     const t = document.createElement('div');
     t.className = 'toast'; t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), ms);
+    setTimeout(() => {
+      t.style.animation = 'none';
+      t.style.opacity = '0';
+      t.style.transform = 'translateX(-50%) translateY(12px)';
+      t.style.transition = 'opacity 0.15s ease-in, transform 0.15s ease-in';
+      setTimeout(() => t.remove(), 160);
+    }, ms);
   }
 
   // --- Storage: sessions ---
@@ -195,29 +262,111 @@
   async function getAudio(id) { const db = await openAudioDB(); return idbGet(db, 'audio', id); }
   async function deleteAudio(id) { const db = await openAudioDB(); return idbDelete(db, 'audio', id); }
 
-  // --- Screens ---
-  function showScreen(id) {
-    $$('.screen').forEach(s => s.classList.remove('active'));
-    $(`#${id}`).classList.add('active');
+  // --- Screens with animation ---
+  let currentScreenId = 'start-screen';
+  const screenHistory = ['start-screen'];
+
+  function showScreen(id, reverse) {
+    if (id === currentScreenId) return;
+    const outEl = $(`#${currentScreenId}`);
+    const inEl = $(`#${id}`);
+    if (!inEl) return;
+
     dom.menuDropdown.classList.add('hidden');
+
+    if (outEl && !reverse) {
+      // Forward animation
+      outEl.classList.remove('active');
+      inEl.classList.add('active', 'entering');
+      inEl.addEventListener('animationend', function handler() {
+        inEl.removeEventListener('animationend', handler);
+        inEl.classList.remove('entering');
+      });
+    } else if (outEl && reverse) {
+      // Backward - just swap immediately for now (slide right would require keeping both visible)
+      outEl.classList.remove('active');
+      inEl.classList.add('active');
+    } else {
+      $$('.screen').forEach(s => s.classList.remove('active'));
+      inEl.classList.add('active');
+    }
+
+    currentScreenId = id;
+
+    // Update header state
+    const isRecording = !!recordingStartTime;
+    const header = $('#header');
+    if (header) {
+      header.classList.toggle('recording', isRecording);
+    }
+  }
+
+  function navigateTo(id) {
+    screenHistory.push(id);
+    showScreen(id, false);
+  }
+
+  function navigateBack(fallback) {
+    screenHistory.pop();
+    const prev = screenHistory[screenHistory.length - 1] || fallback || 'start-screen';
+    showScreen(prev, true);
+  }
+
+  // --- Waveform ---
+  function initWaveformBars() {
+    if (!dom.miniWaveform) return;
+    dom.miniWaveform.innerHTML = '';
+    const barCount = 30;
+    for (let i = 0; i < barCount; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'waveform-bar';
+      bar.style.height = '3px';
+      dom.miniWaveform.appendChild(bar);
+    }
+  }
+
+  function startWaveformAnimation() {
+    if (!dom.miniWaveform) return;
+    const bars = dom.miniWaveform.querySelectorAll('.waveform-bar');
+    if (!bars.length) return;
+    waveformInterval = setInterval(() => {
+      bars.forEach(bar => {
+        const h = Math.floor(Math.random() * 18) + 3;
+        bar.style.height = h + 'px';
+      });
+    }, 150);
+  }
+
+  function stopWaveformAnimation() {
+    clearInterval(waveformInterval);
+    waveformInterval = null;
+    if (dom.miniWaveform) {
+      dom.miniWaveform.querySelectorAll('.waveform-bar').forEach(bar => {
+        bar.style.height = '3px';
+      });
+    }
   }
 
   // --- Session List ---
-  function renderSessionList(container, showDelete) {
+  function renderSessionList(container, showDelete, limit) {
     container.innerHTML = '';
     const sorted = [...sessions].sort((a,b) => b.startTime - a.startTime);
-    if (!sorted.length) { container.innerHTML = '<p class="empty-list-hint">暂无记录</p>'; return; }
-    sorted.forEach(s => {
+    const items = limit ? sorted.slice(0, limit) : sorted;
+    if (!items.length) {
+      container.innerHTML = '<p class="empty-list-hint">\u6682\u65E0\u8BB0\u5F55</p>';
+      return;
+    }
+    items.forEach(s => {
       const card = document.createElement('div');
       card.className = 'session-card';
       card.innerHTML = `
         <div class="session-info">
-          <span class="session-name">${escapeHtml(s.title||'未命名会议')}</span>
-          <span class="session-meta">${formatDate(s.startTime)} · ${formatTime(s.duration)} · ${s.notes.length}条笔记</span>
+          <span class="session-name">${escapeHtml(s.title||'\u672A\u547D\u540D\u4F1A\u8BAE')}</span>
+          <span class="session-meta">${formatDate(s.startTime)} \u00B7 ${formatTime(s.duration)} \u00B7 ${s.notes.length}\u6761\u7B14\u8BB0</span>
         </div>
         <div class="session-actions">
-          ${showDelete ? `<button class="delete-btn" data-id="${s.id}">✕</button>` : ''}
-          <span class="session-arrow">›</span>
+          ${showDelete ? `<button class="delete-btn" data-id="${s.id}">\u2715</button>` : ''}
+          <span class="session-arrow">\u203A</span>
         </div>`;
       card.addEventListener('click', e => {
         if (e.target.classList.contains('delete-btn')) { e.stopPropagation(); deleteSession(s.id); return; }
@@ -228,20 +377,23 @@
   }
 
   function deleteSession(id) {
-    if (!confirm('确定删除此记录？')) return;
+    if (!confirm('\u786E\u5B9A\u5220\u9664\u6B64\u8BB0\u5F55\uFF1F')) return;
     sessions = sessions.filter(s => s.id !== id);
     saveSessions();
     deleteAudio(id).catch(() => {});
-    renderSessionList(dom.sessionList, false);
+    renderSessionList(dom.sessionList, false, 5);
     renderSessionList(dom.historyList, true);
   }
 
   // --- Recording ---
   async function startRecording() {
     const id = generateId();
+    const settings = loadSettings();
+    const sampleRate = parseInt(settings.audioQuality) || 44100;
+
     currentSession = {
       id,
-      title: dom.meetingTitle.value.trim() || `会议 ${formatDate(Date.now())}`,
+      title: dom.meetingTitle.value.trim() || `\u4F1A\u8BAE ${formatDate(Date.now())}`,
       startTime: Date.now(), duration: 0, notes: [], hasAudio: false,
       nativeAudioFile: null,
     };
@@ -254,7 +406,7 @@
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
+          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: sampleRate }
         });
         let mimeType = '';
         for (const mt of ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus']) {
@@ -275,6 +427,7 @@
         mediaRecorder.start(1000);
       } catch (err) {
         console.warn('Mic denied, notes-only mode:', err);
+        showToast('\u9EA6\u514B\u98CE\u6743\u9650\u88AB\u62D2\u7EDD\uFF0C\u4EC5\u7B14\u8BB0\u6A21\u5F0F');
       }
     }
 
@@ -289,9 +442,33 @@
     dom.emptyHint.classList.remove('hidden');
     dom.noteInput.value = '';
     dom.sendBtn.disabled = true;
-    showScreen('notes-screen');
+
+    // Show recording bar with waveform
+    if (dom.recordingBar) {
+      dom.recordingBar.classList.remove('hidden');
+      initWaveformBars();
+      startWaveformAnimation();
+    }
+
+    // Header recording state
+    const header = $('#header');
+    if (header) header.classList.add('recording');
+
+    navigateTo('notes-screen');
     setTimeout(() => dom.noteInput.focus(), 300);
     requestWakeLock();
+
+    // Auto-stop timer
+    const autoStopMin = parseInt(settings.autoStop) || 0;
+    if (autoStopMin > 0) {
+      clearTimeout(autoStopTimer);
+      autoStopTimer = setTimeout(() => {
+        if (recordingStartTime) {
+          showToast(`\u5DF2\u81EA\u52A8\u505C\u6B62\u5F55\u97F3 (${autoStopMin}\u5206\u949F)`);
+          stopRecording();
+        }
+      }, autoStopMin * 60 * 1000);
+    }
   }
 
   function updateTimer() {
@@ -300,10 +477,20 @@
 
   function stopRecording() {
     clearInterval(timerInterval); timerInterval = null;
+    clearTimeout(autoStopTimer); autoStopTimer = null;
     if (currentSession) currentSession.duration = Date.now() - recordingStartTime;
     dom.statusDot.classList.add('hidden');
     dom.timer.classList.add('hidden');
     dom.stopBtn.classList.add('hidden');
+
+    // Hide recording bar, stop waveform
+    if (dom.recordingBar) dom.recordingBar.classList.add('hidden');
+    stopWaveformAnimation();
+
+    // Remove header recording state
+    const header = $('#header');
+    if (header) header.classList.remove('recording');
+
     releaseWakeLock();
     if (isNative) {
       NativeBridge.stopNativeRecording();
@@ -316,11 +503,12 @@
   }
 
   function finishRecording() {
+    recordingStartTime = null;
     sessions.push(currentSession);
     saveSessions();
     openReview(currentSession);
-    mediaRecorder = null; audioChunks = []; recordingStartTime = null;
-    renderSessionList(dom.sessionList, false);
+    mediaRecorder = null; audioChunks = [];
+    renderSessionList(dom.sessionList, false, 5);
   }
 
   // --- Notes ---
@@ -369,12 +557,12 @@
 
   // --- Review ---
   function openReview(session) {
-    dom.reviewTitle.textContent = session.title || '未命名会议';
-    dom.reviewDuration.textContent = `时长 ${formatTime(session.duration)}`;
-    dom.reviewCount.textContent = `${session.notes.length} 条笔记`;
+    dom.reviewTitle.textContent = session.title || '\u672A\u547D\u540D\u4F1A\u8BAE';
+    dom.reviewDuration.textContent = formatTime(session.duration);
+    dom.reviewCount.textContent = `${session.notes.length} \u6761\u7B14\u8BB0`;
     dom.reviewNotes.innerHTML = '';
     if (!session.notes.length) {
-      dom.reviewNotes.innerHTML = '<p class="empty-list-hint">没有笔记</p>';
+      dom.reviewNotes.innerHTML = '<p class="empty-list-hint">\u6CA1\u6709\u7B14\u8BB0</p>';
     }
     session.notes.forEach(n => {
       const e = document.createElement('div');
@@ -385,12 +573,15 @@
     if (dom.transcribeActionRow) {
       const showTranscribe = isNative && !!session.nativeAudioFile;
       dom.transcribeActionRow.classList.toggle('hidden', !showTranscribe);
+      if (showTranscribe) {
+        dom.transcribeActionRow.style.display = 'contents';
+      }
       if (showTranscribe && dom.transcribeEntryBtn) {
-        dom.transcribeEntryBtn.textContent = session.transcription ? '重新转录' : '本地转录';
+        dom.transcribeEntryBtn.textContent = session.transcription ? '\u91CD\u65B0\u8F6C\u5F55' : '\u672C\u5730\u8F6C\u5F55';
       }
     }
     currentSession = session;
-    showScreen('review-screen');
+    navigateTo('review-screen');
   }
 
   // --- ZIP builder ---
@@ -422,15 +613,15 @@
   async function buildSessionZip(session) {
     const prefix = sanitizeFilename(session.title);
     const zipFilename = `${prefix}_quicknote.zip`;
-    let md = `# ${session.title||'未命名会议'}\n\n`;
-    md += `- 日期: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
-    md += `- 时长: ${formatTime(session.duration)}\n`;
-    md += `- 笔记数: ${session.notes.length}\n\n## 笔记\n\n`;
+    let md = `# ${session.title||'\u672A\u547D\u540D\u4F1A\u8BAE'}\n\n`;
+    md += `- \u65E5\u671F: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
+    md += `- \u65F6\u957F: ${formatTime(session.duration)}\n`;
+    md += `- \u7B14\u8BB0\u6570: ${session.notes.length}\n\n## \u7B14\u8BB0\n\n`;
     session.notes.forEach(n => { md += `**[${formatTimestamp(n.timestamp)}]** ${n.text}\n\n`; });
     const analysis = JSON.stringify({
       session: { title:session.title, date:new Date(session.startTime).toISOString(), duration:formatTime(session.duration) },
       notes: session.notes.map(n => ({ t:formatTimestamp(n.timestamp), text:n.text })),
-      instructions: ['1. 将录音转为完整transcript','2. 与笔记按时间戳对齐','3. 笔记是重点，transcript是上下文','输出: 会议纪要 + 重点标注 + 笔记未记但重要的内容']
+      instructions: ['1. \u5C06\u5F55\u97F3\u8F6C\u4E3A\u5B8C\u6574transcript','2. \u4E0E\u7B14\u8BB0\u6309\u65F6\u95F4\u6233\u5BF9\u9F50','3. \u7B14\u8BB0\u662F\u91CD\u70B9\uFF0Ctranscript\u662F\u4E0A\u4E0B\u6587','\u8F93\u51FA: \u4F1A\u8BAE\u7EAA\u8981 + \u91CD\u70B9\u6807\u6CE8 + \u7B14\u8BB0\u672A\u8BB0\u4F46\u91CD\u8981\u7684\u5185\u5BB9']
     }, null, 2);
     if (isNative) {
       const size = await nativeBuildZip(md, analysis, session.nativeAudioFile || '', session.transcription || '', zipFilename);
@@ -453,29 +644,63 @@
     return { blob: new Blob([zip], { type:'application/zip' }), zipFilename, fileCount: files.length };
   }
 
+  async function buildNotesText(session) {
+    let md = `# ${session.title||'\u672A\u547D\u540D\u4F1A\u8BAE'}\n\n`;
+    md += `\u65E5\u671F: ${new Date(session.startTime).toLocaleString('zh-CN')}\n`;
+    md += `\u65F6\u957F: ${formatTime(session.duration)}\n`;
+    md += `\u7B14\u8BB0\u6570: ${session.notes.length}\n\n`;
+    session.notes.forEach(n => { md += `[${formatTimestamp(n.timestamp)}] ${n.text}\n\n`; });
+    if (session.transcription) {
+      md += `---\n\n## \u8F6C\u5F55\u6587\u5B57\u7A3F\n\n${session.transcription}\n`;
+    }
+    return md;
+  }
+
   async function exportSession() {
     if (!currentSession) return;
-    showToast('正在打包...', 60000);
+    const settings = loadSettings();
+
+    if (settings.exportFormat === 'text') {
+      showToast('\u6B63\u5728\u5BFC\u51FA...', 60000);
+      try {
+        const text = await buildNotesText(currentSession);
+        document.querySelector('.toast')?.remove();
+        const filename = sanitizeFilename(currentSession.title) + '_notes.md';
+        if (isNative) {
+          NativeBridge.saveText(filename, text);
+          showToast('\u5DF2\u4FDD\u5B58: ' + filename);
+        } else {
+          const blob = new Blob([text], { type: 'text/markdown' });
+          await downloadBlob(blob, filename);
+        }
+      } catch(e) {
+        document.querySelector('.toast')?.remove();
+        showToast('\u5BFC\u51FA\u5931\u8D25: ' + e.message);
+      }
+      return;
+    }
+
+    showToast('\u6B63\u5728\u6253\u5305...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
         await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
-        showToast('已保存: ' + result.zipFilename);
+        showToast('\u5DF2\u4FDD\u5B58: ' + result.zipFilename);
       } else {
         await saveExport(currentSession, result.blob, result.zipFilename);
         await downloadBlob(result.blob, result.zipFilename);
       }
     } catch(e) {
       document.querySelector('.toast')?.remove();
-      showToast('导出失败: ' + e.message);
+      showToast('\u5BFC\u51FA\u5931\u8D25: ' + e.message);
       console.error(e);
     }
   }
 
   async function shareSession() {
     if (!currentSession) return;
-    showToast('正在打包...', 60000);
+    showToast('\u6B63\u5728\u6253\u5305...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
@@ -487,16 +712,16 @@
       await saveExport(currentSession, result.blob, result.zipFilename);
       if (navigator.canShare && navigator.canShare({ files: [new File([result.blob], result.zipFilename, { type:'application/zip' })] })) {
         const file = new File([result.blob], result.zipFilename, { type:'application/zip' });
-        await navigator.share({ files: [file], title: currentSession.title || 'QuickNote', text: '会议记录' });
+        await navigator.share({ files: [file], title: currentSession.title || 'QuickNote', text: '\u4F1A\u8BAE\u8BB0\u5F55' });
       } else if (navigator.share) {
-        await navigator.share({ title: currentSession.title || 'QuickNote', text: '会议记录已准备好，请使用导出功能下载。' });
+        await navigator.share({ title: currentSession.title || 'QuickNote', text: '\u4F1A\u8BAE\u8BB0\u5F55\u5DF2\u51C6\u5907\u597D\uFF0C\u8BF7\u4F7F\u7528\u5BFC\u51FA\u529F\u80FD\u4E0B\u8F7D\u3002' });
       } else {
         await downloadBlob(result.blob, result.zipFilename);
-        showToast(`已下载 (分享功能不支持此浏览器)`);
+        showToast('\u5DF2\u4E0B\u8F7D (\u5206\u4EAB\u529F\u80FD\u4E0D\u652F\u6301\u6B64\u6D4F\u89C8\u5668)');
       }
     } catch(e) {
       document.querySelector('.toast')?.remove();
-      if (e.name !== 'AbortError') showToast('操作失败: ' + e.message);
+      if (e.name !== 'AbortError') showToast('\u64CD\u4F5C\u5931\u8D25: ' + e.message);
     }
   }
 
@@ -505,7 +730,7 @@
       const db = await openExportsDB();
       await idbPut(db, 'exports', {
         id: generateId(), sessionId: session.id,
-        title: session.title || '未命名会议',
+        title: session.title || '\u672A\u547D\u540D\u4F1A\u8BAE',
         filename, blob: null, nativeFile: true,
         exportedAt: Date.now(), fileSize: fileSize || 0,
       });
@@ -517,20 +742,20 @@
       const db = await openExportsDB();
       await idbPut(db, 'exports', {
         id: generateId(), sessionId: session.id,
-        title: session.title || '未命名会议',
+        title: session.title || '\u672A\u547D\u540D\u4F1A\u8BAE',
         filename, blob, exportedAt: Date.now(), fileSize: blob.size,
       });
     } catch(e) { console.warn('Could not save export:', e); }
   }
 
   async function renderExportsList() {
-    dom.exportsList.innerHTML = '<p class="empty-list-hint">加载中...</p>';
+    dom.exportsList.innerHTML = '<p class="empty-list-hint">\u52A0\u8F7D\u4E2D...</p>';
     try {
       const db = await openExportsDB();
       const exports = await idbGetAll(db, 'exports');
       exports.sort((a,b) => b.exportedAt - a.exportedAt);
       dom.exportsList.innerHTML = '';
-      if (!exports.length) { dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>'; return; }
+      if (!exports.length) { dom.exportsList.innerHTML = '<p class="empty-list-hint">\u8FD8\u6CA1\u6709\u5BFC\u51FA\u8BB0\u5F55</p>'; return; }
       for (const ex of exports) {
         const card = document.createElement('div');
         card.className = 'export-card';
@@ -538,17 +763,17 @@
         card.innerHTML = `
           <div class="export-info">
             <span class="export-name">${escapeHtml(ex.title)}</span>
-            <span class="export-meta">${formatDate(ex.exportedAt)} · ${kb} KB</span>
+            <span class="export-meta">${formatDate(ex.exportedAt)} \u00B7 ${kb} KB</span>
           </div>
           <div class="export-actions">
-            <button class="export-action-btn share-export-btn" data-id="${ex.id}">分享</button>
-            <button class="export-action-btn dl-export-btn" data-id="${ex.id}">↓</button>
-            <button class="export-action-btn del-export-btn" data-id="${ex.id}">✕</button>
+            <button class="export-action-btn share-export-btn" data-id="${ex.id}">\u5206\u4EAB</button>
+            <button class="export-action-btn dl-export-btn" data-id="${ex.id}">\u2193</button>
+            <button class="export-action-btn del-export-btn" data-id="${ex.id}">\u2715</button>
           </div>`;
         card.querySelector('.share-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
-          if (!data) { showToast('文件已丢失'); return; }
+          if (!data) { showToast('\u6587\u4EF6\u5DF2\u4E22\u5931'); return; }
           if (data.nativeFile) { NativeBridge.shareFile(data.filename); return; }
           if (isNative && data.blob) {
             const b64 = await blobToBase64(data.blob);
@@ -561,41 +786,42 @@
             await navigator.share({ files:[file], title: data.title });
           } else {
             await downloadBlob(data.blob, data.filename);
-            showToast('已下载（当前浏览器不支持文件分享）');
+            showToast('\u5DF2\u4E0B\u8F7D\uFF08\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6587\u4EF6\u5206\u4EAB\uFF09');
           }
         });
         card.querySelector('.dl-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
           const data = await idbGet(await openExportsDB(), 'exports', ex.id);
-          if (!data) { showToast('文件已丢失'); return; }
+          if (!data) { showToast('\u6587\u4EF6\u5DF2\u4E22\u5931'); return; }
           if (data.nativeFile) { NativeBridge.shareFile(data.filename); return; }
           await downloadBlob(data.blob, data.filename);
         });
         card.querySelector('.del-export-btn').addEventListener('click', async (e) => {
           e.stopPropagation();
-          if (!confirm('删除此导出记录？')) return;
+          if (!confirm('\u5220\u9664\u6B64\u5BFC\u51FA\u8BB0\u5F55\uFF1F')) return;
           const db2 = await openExportsDB();
           await idbDelete(db2, 'exports', ex.id);
           card.remove();
           if (!dom.exportsList.querySelectorAll('.export-card').length)
-            dom.exportsList.innerHTML = '<p class="empty-list-hint">还没有导出记录</p>';
+            dom.exportsList.innerHTML = '<p class="empty-list-hint">\u8FD8\u6CA1\u6709\u5BFC\u51FA\u8BB0\u5F55</p>';
         });
         dom.exportsList.appendChild(card);
       }
     } catch(e) {
-      dom.exportsList.innerHTML = '<p class="empty-list-hint">加载失败</p>';
+      dom.exportsList.innerHTML = '<p class="empty-list-hint">\u52A0\u8F7D\u5931\u8D25</p>';
       console.error(e);
     }
   }
 
-  // ── Settings Screen ────────────────────────────────────────────────────
+  // == Settings Screen ==
 
   function openSettingsScreen() {
+    applySettingsToUI();
     renderSettingsModels();
-    showScreen('settings-screen');
+    navigateTo('settings-screen');
   }
 
-  /** Renders model cards (Whisper × 3 + Diarization × 1). Listener is on the container, set once in init(). */
+  /** Renders model cards (Whisper x N + Diarization x 1). Listener is on the container, set once in init(). */
   function renderSettingsModels() {
     const container = dom.settingsModelList;
     if (!container || !isNative) return;
@@ -608,64 +834,107 @@
 
     container.innerHTML = '';
 
-    // ── Section: Whisper 转录模型 ──────────────────────────────────────
+    // -- Section: Whisper models --
     const h1 = document.createElement('p');
-    h1.className = 'section-title'; h1.style.marginBottom = '8px'; h1.textContent = '语音转录模型 (Whisper)';
+    h1.className = 'section-title'; h1.style.marginBottom = '8px'; h1.textContent = '\u8BED\u97F3\u8F6C\u5F55\u6A21\u578B (Whisper)';
     container.appendChild(h1);
 
     whisperModels.forEach(m => {
       const card = document.createElement('div');
       card.className = 'model-card';
       card.dataset.modelId = m.id;
+
+      // Check if there's an active download for this model
+      const dlState = downloadProgress[m.id];
+      let actionHtml = '';
+      let progressHtml = '';
+
+      if (dlState && dlState.active) {
+        actionHtml = `<button class="model-dl-btn" data-action="download-whisper" data-mid="${m.id}" disabled>\u4E0B\u8F7D\u4E2D...</button>`;
+        progressHtml = buildModelProgressHtml(dlState);
+      } else if (m.downloaded) {
+        actionHtml = `<button class="model-del-btn" data-action="delete-whisper" data-mid="${m.id}">\u5220\u9664\u6A21\u578B</button>`;
+      } else {
+        actionHtml = `<button class="model-dl-btn" data-action="download-whisper" data-mid="${m.id}">\u4E0B\u8F7D (~${m.sizeMb}MB)</button>`;
+      }
+
       card.innerHTML = `
         <div class="model-card-header">
           <span class="model-card-name">${escapeHtml(m.name)}</span>
-          <span class="model-badge ${m.downloaded ? 'downloaded' : ''}">${m.downloaded ? '✓ 已下载' : '未下载'}</span>
+          <span class="model-badge ${m.downloaded ? 'downloaded' : ''}">${m.downloaded ? '\u2713 \u5DF2\u4E0B\u8F7D' : '\u672A\u4E0B\u8F7D'}</span>
         </div>
-        <div class="model-action-row">
-          ${m.downloaded
-            ? `<button class="model-del-btn" data-action="delete-whisper" data-mid="${m.id}">删除模型</button>`
-            : `<button class="model-dl-btn"  data-action="download-whisper" data-mid="${m.id}">下载 (~${m.sizeMb}MB)</button>`
-          }
-        </div>
-        <div class="model-dl-progress" id="dl-progress-${m.id}"></div>`;
+        <div class="model-action-row">${actionHtml}</div>
+        <div class="model-dl-progress" id="dl-progress-${m.id}">${progressHtml}</div>`;
       container.appendChild(card);
     });
 
-    // ── Section: 说话人识别模型 ───────────────────────────────────────
+    // -- Section: Diarization model --
     const h2 = document.createElement('p');
-    h2.className = 'section-title'; h2.style.cssText = 'margin-top:20px;margin-bottom:8px'; h2.textContent = '说话人识别模型';
+    h2.className = 'section-title'; h2.style.cssText = 'margin-top:20px;margin-bottom:8px'; h2.textContent = '\u8BF4\u8BDD\u4EBA\u8BC6\u522B\u6A21\u578B';
     container.appendChild(h2);
 
     const hint = document.createElement('p');
     hint.className = 'settings-hint'; hint.style.marginBottom = '12px';
-    hint.textContent = '转录时自动区分不同说话人（A/B/C...）。需配合Whisper模型使用，约37MB。';
+    hint.textContent = '\u8F6C\u5F55\u65F6\u81EA\u52A8\u533A\u5206\u4E0D\u540C\u8BF4\u8BDD\u4EBA\uFF08A/B/C...\uFF09\u3002\u9700\u914D\u5408Whisper\u6A21\u578B\u4F7F\u7528\uFF0C\u7EA637MB\u3002';
     container.appendChild(hint);
+
+    const dlStateDiar = downloadProgress['diarization'];
+    let diarActionHtml = '';
+    let diarProgressHtml = '';
+
+    if (dlStateDiar && dlStateDiar.active) {
+      diarActionHtml = `<button class="model-dl-btn" data-action="download-diarize" disabled>\u4E0B\u8F7D\u4E2D...</button>`;
+      diarProgressHtml = buildModelProgressHtml(dlStateDiar);
+    } else if (diarStatus.downloaded) {
+      diarActionHtml = `<button class="model-del-btn" data-action="delete-diarize">\u5220\u9664\u6A21\u578B</button>`;
+    } else {
+      diarActionHtml = `<button class="model-dl-btn" data-action="download-diarize">\u4E0B\u8F7D (~37MB)</button>`;
+    }
 
     const dc = document.createElement('div');
     dc.className = 'model-card';
     dc.innerHTML = `
       <div class="model-card-header">
-        <span class="model-card-name">说话人识别 · ~37MB</span>
-        <span class="model-badge ${diarStatus.downloaded ? 'downloaded' : ''}">${diarStatus.downloaded ? '✓ 已下载' : '未下载'}</span>
+        <span class="model-card-name">\u8BF4\u8BDD\u4EBA\u8BC6\u522B \u00B7 ~37MB</span>
+        <span class="model-badge ${diarStatus.downloaded ? 'downloaded' : ''}">${diarStatus.downloaded ? '\u2713 \u5DF2\u4E0B\u8F7D' : '\u672A\u4E0B\u8F7D'}</span>
       </div>
-      <div class="model-action-row">
-        ${diarStatus.downloaded
-          ? `<button class="model-del-btn" data-action="delete-diarize">删除模型</button>`
-          : `<button class="model-dl-btn"  data-action="download-diarize">下载 (~37MB)</button>`
-        }
-      </div>
-      <div class="model-dl-progress" id="dl-progress-diarization"></div>`;
+      <div class="model-action-row">${diarActionHtml}</div>
+      <div class="model-dl-progress" id="dl-progress-diarization">${diarProgressHtml}</div>`;
     container.appendChild(dc);
   }
 
-  // ── Transcription ──────────────────────────────────────────────────────
+  function buildModelProgressHtml(dlState) {
+    const pct = dlState.percent || 0;
+    const downloaded = dlState.bytesDownloaded || 0;
+    const total = dlState.bytesTotal || 0;
+    const speed = dlState.speed || '';
+    return `
+      <div class="model-progress-bar-track">
+        <div class="model-progress-bar-fill" style="width:${pct}%"></div>
+      </div>
+      <div class="model-progress-info">
+        <span>${pct.toFixed(1)}% \u00B7 ${formatFileSize(downloaded)} / ${total > 0 ? formatFileSize(total) : '?'}</span>
+        <span class="model-progress-speed">${speed}</span>
+      </div>`;
+  }
+
+  function updateModelDownloadProgress(modelKey, data) {
+    const progressEl = document.getElementById('dl-progress-' + modelKey);
+    if (!progressEl) return;
+
+    const dlState = downloadProgress[modelKey];
+    if (!dlState) return;
+
+    progressEl.innerHTML = buildModelProgressHtml(dlState);
+  }
+
+  // == Transcription ==
 
   function openTranscriptionScreen() {
     if (!isNative || !currentSession) return;
     mergedDocFilename = null;
     dom.transcribeBtn.disabled = true;
-    dom.transcribeBtn.textContent = '开始转录';
+    dom.transcribeBtn.textContent = '\u5F00\u59CB\u8F6C\u5F55';
     dom.cancelTranscribeBtn.style.display = 'none';
     dom.transcriptionProgressWrap.classList.add('hidden');
     dom.transcriptionStatus.textContent = '';
@@ -681,11 +950,11 @@
     if (transcriptionKey) {
       dom.transcriptionProgressWrap.classList.remove('hidden');
       dom.cancelTranscribeBtn.style.display = '';
-      dom.transcribeBtn.textContent = '转录中...';
+      dom.transcribeBtn.textContent = '\u8F6C\u5F55\u4E2D...';
     }
 
     populateModelSelect();
-    showScreen('transcription-screen');
+    navigateTo('transcription-screen');
   }
 
   function populateModelSelect() {
@@ -730,7 +999,7 @@
   function startTranscription() {
     if (!currentSession || !selectedModelId || transcriptionKey) return;
     const audioFilename = currentSession.nativeAudioFile;
-    if (!audioFilename) { showToast('没有录音文件'); return; }
+    if (!audioFilename) { showToast('\u6CA1\u6709\u5F55\u97F3\u6587\u4EF6'); return; }
 
     const key          = 'tr_' + Date.now();
     const lang         = dom.whisperLangSelect.value;
@@ -740,7 +1009,7 @@
 
     transcriptionKey = key;
     dom.transcribeBtn.disabled = true;
-    dom.transcribeBtn.textContent = '转录中...';
+    dom.transcribeBtn.textContent = '\u8F6C\u5F55\u4E2D...';
     dom.cancelTranscribeBtn.style.display = '';
     dom.transcriptionProgressWrap.classList.remove('hidden');
     dom.transcriptionResult.classList.add('hidden');
@@ -767,19 +1036,19 @@
 
     dom.cancelTranscribeBtn.style.display = 'none';
     dom.transcribeBtn.disabled = false;
-    dom.transcribeBtn.textContent = '重新转录';
+    dom.transcribeBtn.textContent = '\u91CD\u65B0\u8F6C\u5F55';
 
     if (result.startsWith('error:')) {
-      dom.transcriptionStatus.textContent = '转录失败: ' + result.slice(7);
-      showToast('转录失败');
+      dom.transcriptionStatus.textContent = '\u8F6C\u5F55\u5931\u8D25: ' + result.slice(7);
+      showToast('\u8F6C\u5F55\u5931\u8D25');
     } else {
-      dom.transcriptionStatus.textContent = '转录完成 ✓';
+      dom.transcriptionStatus.textContent = '\u8F6C\u5F55\u5B8C\u6210 \u2713';
       dom.transcriptText.textContent = result;
       dom.transcriptionResult.classList.remove('hidden');
       if (currentSession) {
         currentSession.transcription = result;
         saveSessions();
-        if (dom.transcribeEntryBtn) dom.transcribeEntryBtn.textContent = '重新转录';
+        if (dom.transcribeEntryBtn) dom.transcribeEntryBtn.textContent = '\u91CD\u65B0\u8F6C\u5F55';
       }
     }
   }
@@ -793,8 +1062,8 @@
     stopProgressBar(false);
     dom.cancelTranscribeBtn.style.display = 'none';
     dom.transcribeBtn.disabled = !selectedModelId;
-    dom.transcribeBtn.textContent = '开始转录';
-    dom.transcriptionStatus.textContent = '转录已取消';
+    dom.transcribeBtn.textContent = '\u5F00\u59CB\u8F6C\u5F55';
+    dom.transcriptionStatus.textContent = '\u8F6C\u5F55\u5DF2\u53D6\u6D88';
   }
 
   function getTranscriptEstimatedMs(modelId, durationSecs, diarize) {
@@ -815,10 +1084,10 @@
       const remainS  = Math.max(0, Math.ceil((progressEstimatedMs - elapsed) / 1000));
       if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = pct + '%';
       if (dom.transcriptionStatus) {
-        const phase = diarize && elapsed < progressEstimatedMs / 3 ? '分析说话人中...' : '转录中...';
+        const phase = diarize && elapsed < progressEstimatedMs / 3 ? '\u5206\u6790\u8BF4\u8BDD\u4EBA\u4E2D...' : '\u8F6C\u5F55\u4E2D...';
         dom.transcriptionStatus.textContent = remainS > 0
-          ? `${phase} 已用时 ${elapsedS}秒，约还需 ${remainS}秒`
-          : `${phase} 已用时 ${elapsedS}秒`;
+          ? `${phase} \u5DF2\u7528\u65F6 ${elapsedS}\u79D2\uFF0C\u7EA6\u8FD8\u9700 ${remainS}\u79D2`
+          : `${phase} \u5DF2\u7528\u65F6 ${elapsedS}\u79D2`;
       }
     }, 1000);
   }
@@ -828,41 +1097,36 @@
     if (dom.transcriptionProgressBar) dom.transcriptionProgressBar.style.width = success ? '100%' : '0%';
   }
 
-  // ── Notes Fusion ──────────────────────────────────────────────────────
+  // == Notes Fusion ==
 
-  /**
-   * Generates a merged document combining the transcript and hand-written notes.
-   * Sections: transcript · notes table · timeline (interleaved by timestamp)
-   */
   function generateMergedDoc(session, transcriptText) {
-    const title    = session.title || '未命名会议';
+    const title    = session.title || '\u672A\u547D\u540D\u4F1A\u8BAE';
     const date     = new Date(session.startTime).toLocaleString('zh-CN');
     const duration = formatTime(session.duration);
 
-    let doc = `# ${title} — 融合纪要\n\n`;
-    doc += `**日期**: ${date}  |  **时长**: ${duration}  |  **笔记**: ${session.notes.length}条\n\n---\n\n`;
+    let doc = `# ${title} \u2014 \u878D\u5408\u7EAA\u8981\n\n`;
+    doc += `**\u65E5\u671F**: ${date}  |  **\u65F6\u957F**: ${duration}  |  **\u7B14\u8BB0**: ${session.notes.length}\u6761\n\n---\n\n`;
 
     // Section 1: Transcript
-    doc += `## 转录文字稿\n\n`;
-    doc += (transcriptText || '（无转录文字稿）') + '\n\n---\n\n';
+    doc += `## \u8F6C\u5F55\u6587\u5B57\u7A3F\n\n`;
+    doc += (transcriptText || '\uFF08\u65E0\u8F6C\u5F55\u6587\u5B57\u7A3F\uFF09') + '\n\n---\n\n';
 
     // Section 2: Hand-written notes
-    doc += `## 手动笔记\n\n`;
+    doc += `## \u624B\u52A8\u7B14\u8BB0\n\n`;
     if (session.notes.length) {
-      doc += `| 时间 | 内容 |\n|------|------|\n`;
+      doc += `| \u65F6\u95F4 | \u5185\u5BB9 |\n|------|------|\n`;
       session.notes.forEach(n => {
         doc += `| ${formatTimestamp(n.timestamp)} | ${n.text} |\n`;
       });
     } else {
-      doc += '（无手动笔记）\n';
+      doc += '\uFF08\u65E0\u624B\u52A8\u7B14\u8BB0\uFF09\n';
     }
     doc += '\n---\n\n';
 
     // Section 3: Timeline (interleaved)
-    doc += `## 时间轴融合\n\n`;
-    doc += `> ★ = 手动笔记\n\n`;
+    doc += `## \u65F6\u95F4\u8F74\u878D\u5408\n\n`;
+    doc += `> \u2605 = \u624B\u52A8\u7B14\u8BB0\n\n`;
 
-    // Parse diarized transcript lines: [说话人A 0:00-0:35] text
     const segRegex = /^\[([^\]]+?)\s+(\d+:\d{2})-\d+:\d{2}\]\s+(.+)$/;
     const items    = [];
 
@@ -873,8 +1137,7 @@
           const [, speaker, startStr, text] = m;
           const secs = parseTimestampStr(startStr);
           items.push({ time: secs, type: 'seg', speaker, text });
-        } else if (line.trim() && !transcriptText.includes('[说话人')) {
-          // Plain transcript (no diarization) — add as one block at t=0
+        } else if (line.trim() && !transcriptText.includes('[\u8BF4\u8BDD\u4EBA')) {
           items.push({ time: 0, type: 'seg', speaker: null, text: line.trim() });
         }
       });
@@ -888,14 +1151,14 @@
     items.forEach(item => {
       const t = formatTimestampSecs(item.time);
       if (item.type === 'note') {
-        doc += `**[${t}] ★ ${item.text}**\n`;
+        doc += `**[${t}] \u2605 ${item.text}**\n`;
       } else {
         const sp = item.speaker ? `[${item.speaker}] ` : '';
         doc += `[${t}] ${sp}${item.text}\n`;
       }
     });
 
-    doc += `\n---\n*由 QuickNote 生成 · ${new Date().toLocaleDateString('zh-CN')}*\n`;
+    doc += `\n---\n*\u7531 QuickNote \u751F\u6210 \u00B7 ${new Date().toLocaleDateString('zh-CN')}*\n`;
     return doc;
   }
 
@@ -913,7 +1176,7 @@
     NativeBridge.saveText(filename, docContent);
     mergedDocFilename = filename;
     dom.shareMergedBtn.classList.remove('hidden');
-    showToast('融合文档已生成');
+    showToast('\u878D\u5408\u6587\u6863\u5DF2\u751F\u6210');
   }
 
   function shareMergedDoc() {
@@ -948,11 +1211,19 @@
   // --- Events ---
   function init() {
     loadSessions();
-    renderSessionList(dom.sessionList, false);
+    renderSessionList(dom.sessionList, false, 5);
 
+    // Start recording
     dom.startBtn.addEventListener('click', startRecording);
     dom.meetingTitle.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); startRecording(); } });
 
+    // View all button -> history
+    dom.viewAllBtn?.addEventListener('click', () => {
+      renderSessionList(dom.historyList, true);
+      navigateTo('history-screen');
+    });
+
+    // Note input
     dom.noteInput.addEventListener('input', () => {
       autoResize();
       dom.sendBtn.disabled = !dom.noteInput.value.trim();
@@ -962,34 +1233,57 @@
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 
+    // Stop recording
     dom.stopBtn.addEventListener('click', () => {
-      if (currentSession && !currentSession.notes.length && !confirm('还没有笔记，确定结束？')) return;
+      if (currentSession && !currentSession.notes.length && !confirm('\u8FD8\u6CA1\u6709\u7B14\u8BB0\uFF0C\u786E\u5B9A\u7ED3\u675F\uFF1F')) return;
       stopRecording();
     });
 
+    // Review actions
     dom.exportBtn.addEventListener('click', exportSession);
     dom.shareBtn.addEventListener('click', shareSession);
 
     dom.newBtn.addEventListener('click', () => {
       currentSession = null;
       dom.meetingTitle.value = '';
-      showScreen('start-screen');
-      renderSessionList(dom.sessionList, false);
+      screenHistory.length = 0;
+      screenHistory.push('start-screen');
+      showScreen('start-screen', true);
+      renderSessionList(dom.sessionList, false, 5);
     });
 
+    // Menu
     dom.menuBtn.addEventListener('click', e => { e.stopPropagation(); dom.menuDropdown.classList.toggle('hidden'); });
     document.addEventListener('click', () => dom.menuDropdown.classList.add('hidden'));
 
-    dom.menuExport.addEventListener('click', () => { if (currentSession) exportSession(); });
-    dom.menuHistory.addEventListener('click', () => { renderSessionList(dom.historyList, true); showScreen('history-screen'); });
-    dom.menuExports.addEventListener('click', () => { renderExportsList(); showScreen('exports-screen'); });
+    dom.menuHistory.addEventListener('click', () => { renderSessionList(dom.historyList, true); navigateTo('history-screen'); });
+    dom.menuExports.addEventListener('click', () => { renderExportsList(); navigateTo('exports-screen'); });
     dom.menuSettings?.addEventListener('click', openSettingsScreen);
 
-    dom.backBtn.addEventListener('click', () => { showScreen('start-screen'); renderSessionList(dom.sessionList, false); });
-    dom.backFromExports.addEventListener('click', () => showScreen('start-screen'));
-    dom.backFromSettings?.addEventListener('click', () => showScreen('start-screen'));
+    // Back buttons
+    dom.backBtn.addEventListener('click', () => {
+      screenHistory.length = 0;
+      screenHistory.push('start-screen');
+      showScreen('start-screen', true);
+      renderSessionList(dom.sessionList, false, 5);
+    });
+    dom.backFromExports.addEventListener('click', () => {
+      screenHistory.length = 0;
+      screenHistory.push('start-screen');
+      showScreen('start-screen', true);
+    });
+    dom.backFromSettings?.addEventListener('click', () => {
+      screenHistory.length = 0;
+      screenHistory.push('start-screen');
+      showScreen('start-screen', true);
+    });
 
-    // ── Settings model list: event delegation — registered ONCE here ───
+    // Settings change listeners
+    dom.settingAudioQuality?.addEventListener('change', onSettingChange);
+    dom.settingAutoStop?.addEventListener('change', onSettingChange);
+    dom.settingExportFormat?.addEventListener('change', onSettingChange);
+
+    // == Settings model list: event delegation -- registered ONCE here ==
     // Handles ALL download/delete for both Whisper and Diarization models
     dom.settingsModelList?.addEventListener('click', e => {
       const btn = e.target.closest('[data-action]');
@@ -999,68 +1293,138 @@
 
       if (action === 'download-whisper') {
         btn.disabled = true;
-        btn.textContent = '下载中...';
-        const progressEl = document.getElementById('dl-progress-' + mid);
+        btn.textContent = '\u4E0B\u8F7D\u4E2D...';
+        const modelKey = mid;
+        const progressEl = document.getElementById('dl-progress-' + modelKey);
+
+        // Initialize download tracking
+        downloadProgress[modelKey] = {
+          active: true, percent: 0, bytesDownloaded: 0, bytesTotal: 0,
+          speed: '', startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+        };
+        if (progressEl) progressEl.innerHTML = buildModelProgressHtml(downloadProgress[modelKey]);
+
         const cb = 'qnDl' + Date.now();
         window[cb] = function(data) {
           if (data.type === 'progress') {
-            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+            const dlState = downloadProgress[modelKey];
+            if (dlState) {
+              // Calculate progress
+              const fileIdx = data.file || 1;
+              const totalFiles = data.total || 1;
+              const fileProgress = (data.progress !== undefined) ? data.progress : (fileIdx / totalFiles);
+              const overallPct = ((fileIdx - 1) / totalFiles + fileProgress / totalFiles) * 100;
+
+              // Calculate speed
+              const now = Date.now();
+              const bytesNow = data.bytesDownloaded || (overallPct / 100 * (data.totalBytes || 0));
+              const elapsed = (now - dlState.lastTime) / 1000;
+              if (elapsed > 0.5) {
+                const speedBps = (bytesNow - dlState.lastBytes) / elapsed;
+                dlState.speed = speedBps > 0 ? formatFileSize(speedBps) + '/s' : '';
+                dlState.lastBytes = bytesNow;
+                dlState.lastTime = now;
+              }
+
+              dlState.percent = Math.min(99, overallPct);
+              dlState.bytesDownloaded = data.bytesDownloaded || bytesNow;
+              dlState.bytesTotal = data.totalBytes || 0;
+              updateModelDownloadProgress(modelKey, data);
+            }
+            // Also update text info
+            if (progressEl && !downloadProgress[modelKey]) {
+              progressEl.textContent = `\u6B63\u5728\u4E0B\u8F7D: ${data.name} (${data.file}/${data.total})`;
+            }
           } else if (data.type === 'done') {
             delete window[cb];
+            delete downloadProgress[modelKey];
             if (data.result === 'ok') {
-              showToast('模型下载完成');
+              showToast('\u6A21\u578B\u4E0B\u8F7D\u5B8C\u6210');
               renderSettingsModels();
             } else {
-              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
+              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">\u4E0B\u8F7D\u5931\u8D25: ${data.result}</span>`;
               btn.disabled = false;
-              btn.textContent = '重试下载';
+              btn.textContent = '\u91CD\u8BD5\u4E0B\u8F7D';
             }
           }
         };
         NativeBridge.downloadWhisperModel(mid, cb);
 
       } else if (action === 'delete-whisper') {
-        if (!confirm('确定删除此模型？需要时可重新下载。')) return;
+        if (!confirm('\u786E\u5B9A\u5220\u9664\u6B64\u6A21\u578B\uFF1F\u9700\u8981\u65F6\u53EF\u91CD\u65B0\u4E0B\u8F7D\u3002')) return;
         NativeBridge.deleteWhisperModel(mid);
-        showToast('模型已删除');
+        showToast('\u6A21\u578B\u5DF2\u5220\u9664');
         renderSettingsModels();
 
       } else if (action === 'download-diarize') {
         btn.disabled = true;
-        btn.textContent = '下载中...';
+        btn.textContent = '\u4E0B\u8F7D\u4E2D...';
+        const modelKey = 'diarization';
         const progressEl = document.getElementById('dl-progress-diarization');
+
+        downloadProgress[modelKey] = {
+          active: true, percent: 0, bytesDownloaded: 0, bytesTotal: 0,
+          speed: '', startTime: Date.now(), lastBytes: 0, lastTime: Date.now(),
+        };
+        if (progressEl) progressEl.innerHTML = buildModelProgressHtml(downloadProgress[modelKey]);
+
         const cb = 'qnDl' + Date.now();
         window[cb] = function(data) {
           if (data.type === 'progress') {
-            if (progressEl) progressEl.textContent = `正在下载: ${data.name} (${data.file}/${data.total})`;
+            const dlState = downloadProgress[modelKey];
+            if (dlState) {
+              const fileIdx = data.file || 1;
+              const totalFiles = data.total || 1;
+              const fileProgress = (data.progress !== undefined) ? data.progress : (fileIdx / totalFiles);
+              const overallPct = ((fileIdx - 1) / totalFiles + fileProgress / totalFiles) * 100;
+
+              const now = Date.now();
+              const bytesNow = data.bytesDownloaded || (overallPct / 100 * (data.totalBytes || 0));
+              const elapsed = (now - dlState.lastTime) / 1000;
+              if (elapsed > 0.5) {
+                const speedBps = (bytesNow - dlState.lastBytes) / elapsed;
+                dlState.speed = speedBps > 0 ? formatFileSize(speedBps) + '/s' : '';
+                dlState.lastBytes = bytesNow;
+                dlState.lastTime = now;
+              }
+
+              dlState.percent = Math.min(99, overallPct);
+              dlState.bytesDownloaded = data.bytesDownloaded || bytesNow;
+              dlState.bytesTotal = data.totalBytes || 0;
+              updateModelDownloadProgress(modelKey, data);
+            }
+            if (progressEl && !downloadProgress[modelKey]) {
+              progressEl.textContent = `\u6B63\u5728\u4E0B\u8F7D: ${data.name} (${data.file}/${data.total})`;
+            }
           } else if (data.type === 'done') {
             delete window[cb];
+            delete downloadProgress[modelKey];
             if (data.result === 'ok') {
-              showToast('说话人识别模型下载完成');
+              showToast('\u8BF4\u8BDD\u4EBA\u8BC6\u522B\u6A21\u578B\u4E0B\u8F7D\u5B8C\u6210');
               renderSettingsModels();
             } else {
-              if (progressEl) progressEl.textContent = '下载失败: ' + data.result;
+              if (progressEl) progressEl.innerHTML = `<span style="color:var(--danger)">\u4E0B\u8F7D\u5931\u8D25: ${data.result}</span>`;
               btn.disabled = false;
-              btn.textContent = '重试下载';
+              btn.textContent = '\u91CD\u8BD5\u4E0B\u8F7D';
             }
           }
         };
         NativeBridge.downloadDiarizationModel(cb);
 
       } else if (action === 'delete-diarize') {
-        if (!confirm('确定删除说话人识别模型？需要时可重新下载。')) return;
+        if (!confirm('\u786E\u5B9A\u5220\u9664\u8BF4\u8BDD\u4EBA\u8BC6\u522B\u6A21\u578B\uFF1F\u9700\u8981\u65F6\u53EF\u91CD\u65B0\u4E0B\u8F7D\u3002')) return;
         NativeBridge.deleteDiarizationModel();
-        showToast('模型已删除');
+        showToast('\u6A21\u578B\u5DF2\u5220\u9664');
         renderSettingsModels();
       }
     });
 
-    // ── Transcription screen ───────────────────────────────────────────
+    // == Transcription screen ==
     if (isNative) {
       dom.transcribeEntryBtn?.addEventListener('click', openTranscriptionScreen);
       dom.backFromTranscription?.addEventListener('click', () => {
-        if (transcriptionKey) showToast('转录在后台继续运行，完成后返回查看结果');
-        showScreen('review-screen');
+        if (transcriptionKey) showToast('\u8F6C\u5F55\u5728\u540E\u53F0\u7EE7\u7EED\u8FD0\u884C\uFF0C\u5B8C\u6210\u540E\u8FD4\u56DE\u67E5\u770B\u7ED3\u679C');
+        navigateBack('review-screen');
       });
       dom.transcribeBtn?.addEventListener('click', startTranscription);
       dom.cancelTranscribeBtn?.addEventListener('click', cancelTranscription);
@@ -1072,7 +1436,7 @@
         const text = dom.transcriptText?.textContent;
         if (!text) return;
         if (navigator.clipboard) {
-          navigator.clipboard.writeText(text).then(() => showToast('已复制'));
+          navigator.clipboard.writeText(text).then(() => showToast('\u5DF2\u590D\u5236'));
         }
       });
       dom.mergeNotesBtn?.addEventListener('click', mergeNotes);
@@ -1090,6 +1454,9 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && mediaRecorder?.state === 'recording') requestWakeLock();
     });
+
+    // Load initial settings
+    applySettingsToUI();
   }
 
   if ('serviceWorker' in navigator) {

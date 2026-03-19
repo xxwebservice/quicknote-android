@@ -49,8 +49,9 @@ public class MainActivity extends Activity {
     private static final int EDIT_IMAGE_REQUEST = 1004;
     private ValueCallback<Uri[]> fileUploadCallback;
     private String cameraCallbackFn;
-    private String editingImageFilename; // track which file is being edited
+    private String editingImageFilename;
     private String editingImageCallbackFn;
+    private long editingFileLastModified; // detect in-place edits
     private Uri cameraPhotoUri;
 
     @Override
@@ -245,6 +246,7 @@ public class MainActivity extends Activity {
                 if (!file.exists()) return;
                 editingImageFilename = filename;
                 editingImageCallbackFn = callbackFn != null ? callbackFn : "";
+                editingFileLastModified = file.lastModified(); // track for in-place edit detection
                 Uri contentUri = FileProvider.getUriForFile(
                     MainActivity.this, "com.quicknote.app.fileprovider", file);
                 Intent editIntent = new Intent(Intent.ACTION_EDIT);
@@ -283,6 +285,10 @@ public class MainActivity extends Activity {
             cameraPhotoUri = FileProvider.getUriForFile(
                 MainActivity.this, "com.quicknote.app.fileprovider", photoFile);
             takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri);
+            // Hints for full-quality capture (disable quick-snap, enable stabilization)
+            takePictureIntent.putExtra("android.intent.extra.quickCapture", false);
+            takePictureIntent.putExtra("android.intent.extras.CAMERA_FACING", 0); // rear camera
+            takePictureIntent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1); // hint: high quality
             runOnUiThread(() -> {
                 try {
                     startActivityForResult(takePictureIntent, CAMERA_CAPTURE_REQUEST);
@@ -636,8 +642,8 @@ public class MainActivity extends Activity {
         public String getDebugInfo() {
             try {
                 JSONObject info = new JSONObject();
-                info.put("versionName", "2.4");
-                info.put("versionCode", 24);
+                info.put("versionName", "3.0");
+                info.put("versionCode", 30);
                 info.put("sdk", Build.VERSION.SDK_INT);
                 info.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                 info.put("abi", Build.SUPPORTED_ABIS[0]);
@@ -733,30 +739,40 @@ public class MainActivity extends Activity {
             editingImageCallbackFn = null;
 
             if (filename != null) {
+                final long prevModified = editingFileLastModified;
                 new Thread(() -> {
                     try {
                         File dir = getExternalFilesDir("QuickNote");
                         File originalFile = new File(dir, filename);
+                        boolean updated = false;
 
-                        // Case 1: Editor returned a new URI in data
-                        if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                            Uri editedUri = data.getData();
-                            InputStream is = getContentResolver().openInputStream(editedUri);
-                            if (is != null) {
-                                FileOutputStream fos = new FileOutputStream(originalFile);
-                                byte[] buf = new byte[65536];
-                                int len;
-                                while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
-                                is.close();
-                                fos.close();
-                                // Also update gallery copy
-                                saveToSystemGallery(originalFile, filename);
-                            }
+                        // Case 1: Editor returned a new URI in result data
+                        if (data != null && data.getData() != null) {
+                            try {
+                                Uri editedUri = data.getData();
+                                InputStream is = getContentResolver().openInputStream(editedUri);
+                                if (is != null) {
+                                    FileOutputStream fos = new FileOutputStream(originalFile);
+                                    byte[] buf = new byte[65536];
+                                    int len;
+                                    while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
+                                    is.close();
+                                    fos.close();
+                                    updated = true;
+                                }
+                            } catch (Exception ignored) {}
                         }
-                        // Case 2: Editor wrote back to our file in-place (some editors do this)
-                        // No action needed — file is already updated
 
-                        // Notify JS to refresh the image
+                        // Case 2: Editor wrote back in-place — detect by timestamp or size change
+                        if (!updated && originalFile.exists() && originalFile.lastModified() != prevModified) {
+                            updated = true;
+                        }
+
+                        if (updated) {
+                            saveToSystemGallery(originalFile, filename);
+                        }
+
+                        // Always send callback to JS to refresh thumbnail (re-read is always safe)
                         if (cbFn != null && !cbFn.isEmpty()) {
                             // Build new thumbnail
                             Bitmap bmp = BitmapFactory.decodeFile(originalFile.getAbsolutePath());

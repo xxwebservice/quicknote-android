@@ -121,6 +121,7 @@
     audioQuality: '44100',
     autoStop: '0',
     exportFormat: 'zip',
+    stealthMode: 'off',
   };
 
   function loadSettings() {
@@ -141,6 +142,8 @@
     if (dom.settingAudioQuality) dom.settingAudioQuality.value = s.audioQuality;
     if (dom.settingAutoStop) dom.settingAutoStop.value = s.autoStop;
     if (dom.settingExportFormat) dom.settingExportFormat.value = s.exportFormat;
+    const stealthSel = $('#setting-stealth-mode');
+    if (stealthSel) stealthSel.value = s.stealthMode || 'off';
     // Storage path
     if (dom.storagePathDisplay) {
       if (isNative && typeof NativeBridge.getStoragePath === 'function') {
@@ -152,10 +155,12 @@
   }
 
   function onSettingChange() {
+    const stealthSel = $('#setting-stealth-mode');
     const settings = {
       audioQuality: dom.settingAudioQuality?.value || '44100',
       autoStop: dom.settingAutoStop?.value || '0',
       exportFormat: dom.settingExportFormat?.value || 'zip',
+      stealthMode: stealthSel?.value || 'off',
     };
     saveSettings(settings);
   }
@@ -553,11 +558,23 @@
     }
 
     recordingStartTime = Date.now();
+    const stealth = loadSettings().stealthMode === 'on';
     timerInterval = setInterval(updateTimer, 1000);
-    dom.statusDot.classList.remove('hidden');
-    dom.timer.classList.remove('hidden');
-    dom.stopBtn.classList.remove('hidden');
-    dom.currentTitle.textContent = currentSession.title;
+    if (stealth) {
+      // Stealth: hide all recording indicators, stop button looks like a normal nav
+      dom.statusDot.classList.add('hidden');
+      dom.timer.classList.add('hidden');
+      dom.stopBtn.classList.remove('hidden');
+      dom.stopBtn.textContent = '完成';
+      dom.stopBtn.style.cssText = 'opacity:0.5;font-size:13px;padding:4px 10px;border-color:transparent;';
+    } else {
+      dom.statusDot.classList.remove('hidden');
+      dom.timer.classList.remove('hidden');
+      dom.stopBtn.classList.remove('hidden');
+      dom.stopBtn.textContent = '完成';
+      dom.stopBtn.style.cssText = '';
+    }
+    dom.currentTitle.textContent = stealth ? '' : currentSession.title;
     dom.notesEntries.innerHTML = '';
     dom.notesEntries.appendChild(dom.emptyHint);
     dom.emptyHint.classList.remove('hidden');
@@ -1645,6 +1662,7 @@
     dom.settingAudioQuality?.addEventListener('change', onSettingChange);
     dom.settingAutoStop?.addEventListener('change', onSettingChange);
     dom.settingExportFormat?.addEventListener('change', onSettingChange);
+    $('#setting-stealth-mode')?.addEventListener('change', onSettingChange);
 
     // == Settings model list: event delegation -- registered ONCE here ==
     // Handles ALL download/delete for both Whisper and Diarization models

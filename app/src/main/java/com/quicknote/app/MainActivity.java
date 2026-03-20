@@ -602,17 +602,31 @@ public class MainActivity extends Activity {
 
         // ── Backup & Restore ────────────────────────────────────────────
 
+        /** Get public backup directory (survives app uninstall) */
+        private File getBackupDir() {
+            // Save to Documents/QuickNote/ (public, survives uninstall)
+            File dir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOCUMENTS), "QuickNote");
+            if (!dir.exists()) dir.mkdirs();
+            return dir;
+        }
+
         @JavascriptInterface
         public boolean saveBackup(String jsonData) {
             try {
-                File dir = getExternalFilesDir("QuickNote");
-                if (dir != null && !dir.exists()) dir.mkdirs();
-                File backup = new File(dir, "quicknote_backup.json");
+                // Save to PUBLIC Documents/QuickNote/ so it survives uninstall
+                File backup = new File(getBackupDir(), "quicknote_backup.json");
                 FileOutputStream fos = new FileOutputStream(backup);
                 fos.write(jsonData.getBytes("UTF-8"));
                 fos.close();
+                // Also save a copy to app-private dir as fallback
+                File privateBackup = new File(getExternalFilesDir("QuickNote"), "quicknote_backup.json");
+                FileOutputStream fos2 = new FileOutputStream(privateBackup);
+                fos2.write(jsonData.getBytes("UTF-8"));
+                fos2.close();
+                final String path = backup.getAbsolutePath();
                 runOnUiThread(() ->
-                    Toast.makeText(MainActivity.this, "备份已保存", Toast.LENGTH_SHORT).show());
+                    Toast.makeText(MainActivity.this, "备份已保存到: " + path, Toast.LENGTH_LONG).show());
                 return true;
             } catch (Exception e) { e.printStackTrace(); return false; }
         }
@@ -620,8 +634,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String loadBackup() {
             try {
-                File dir = getExternalFilesDir("QuickNote");
-                File backup = new File(dir, "quicknote_backup.json");
+                // Try public Documents first (survives uninstall)
+                File backup = new File(getBackupDir(), "quicknote_backup.json");
+                if (!backup.exists()) {
+                    // Fallback to app-private dir
+                    backup = new File(getExternalFilesDir("QuickNote"), "quicknote_backup.json");
+                }
                 if (!backup.exists()) return "";
                 FileInputStream fis = new FileInputStream(backup);
                 byte[] data = new byte[(int) backup.length()];
@@ -642,8 +660,8 @@ public class MainActivity extends Activity {
         public String getDebugInfo() {
             try {
                 JSONObject info = new JSONObject();
-                info.put("versionName", "3.0");
-                info.put("versionCode", 30);
+                info.put("versionName", "3.2");
+                info.put("versionCode", 32);
                 info.put("sdk", Build.VERSION.SDK_INT);
                 info.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                 info.put("abi", Build.SUPPORTED_ABIS[0]);

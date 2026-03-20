@@ -46,6 +46,27 @@ jobs:
         gradle wrapper --gradle-version 8.5
         chmod +x gradlew
 
+    - name: Generate signing keystore
+      run: |
+        # Generate a keystore with fixed credentials (same key every build)
+        # The keystore file itself differs but credentials are the same,
+        # and Gradle will sign with this config for consistent signatures.
+        # To ensure truly identical signatures across builds, we use a
+        # committed keystore. If not present, generate one.
+        if [ ! -f app/quicknote.keystore ]; then
+          keytool -genkeypair \
+            -keystore app/quicknote.keystore \
+            -storepass quicknote2026 -keypass quicknote2026 \
+            -alias quicknote -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=QuickNote,OU=Dev,O=QuickNote,L=SH,ST=SH,C=CN"
+          # Commit the keystore back to repo for future builds
+          git config user.name "CI Bot"
+          git config user.email "ci@quicknote.app"
+          git add app/quicknote.keystore
+          git commit -m "ci: add fixed signing keystore" || true
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main || true
+        fi
+
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace
 

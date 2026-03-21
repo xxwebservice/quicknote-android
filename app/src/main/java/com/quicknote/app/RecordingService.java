@@ -29,9 +29,10 @@ import java.io.IOException;
  */
 public class RecordingService extends Service {
 
-    static final String ACTION_START = "com.quicknote.app.START_RECORDING";
-    static final String ACTION_STOP  = "com.quicknote.app.STOP_RECORDING";
-    static final String EXTRA_FILE   = "filename";
+    static final String ACTION_START    = "com.quicknote.app.START_RECORDING";
+    static final String ACTION_STOP     = "com.quicknote.app.STOP_RECORDING";
+    static final String EXTRA_FILE      = "filename";
+    static final String EXTRA_QUALITY   = "quality"; // "low" | "standard" | "high"
     static final String CHANNEL_ID   = "qn_recording";
     static final int    NOTIF_ID     = 101;
     private static final String TAG  = "RecordingService";
@@ -43,7 +44,7 @@ public class RecordingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_STICKY;
         if (ACTION_START.equals(intent.getAction())) {
-            startRecording(intent.getStringExtra(EXTRA_FILE));
+            startRecording(intent.getStringExtra(EXTRA_FILE), intent.getStringExtra(EXTRA_QUALITY));
         } else if (ACTION_STOP.equals(intent.getAction())) {
             stopRecording();
         }
@@ -51,18 +52,34 @@ public class RecordingService extends Service {
     }
 
     private void startRecording(String filename) {
+        startRecording(filename, "standard");
+    }
+
+    private void startRecording(String filename, String quality) {
         if (filename == null || filename.isEmpty()) { stopSelf(); return; }
 
         File dir = getExternalFilesDir("QuickNote");
         if (dir != null) dir.mkdirs();
         String outputPath = new File(dir, filename).getAbsolutePath();
 
+        // Quality presets:
+        // low:      16kHz 48kbps  ~0.35MB/min (~21MB/hr) — minimum for speech
+        // standard: 16kHz 96kbps  ~0.7MB/min  (~42MB/hr) — good balance
+        // high:     44.1kHz 192kbps ~1.4MB/min (~84MB/hr) — best clarity
+        int sampleRate, bitRate;
+        switch (quality != null ? quality : "standard") {
+            case "low":      sampleRate = 16000; bitRate = 48000;  break;
+            case "high":     sampleRate = 44100; bitRate = 192000; break;
+            default:         sampleRate = 16000; bitRate = 96000;  break; // standard
+        }
+        Log.i(TAG, "Recording quality=" + quality + " rate=" + sampleRate + " bitrate=" + bitRate);
+
         recorder = new MediaRecorder();
         recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        recorder.setAudioSamplingRate(16000);    // 16kHz: optimal for speech, compatible with Whisper
-        recorder.setAudioEncodingBitRate(64000);  // 64kbps: clear speech, ~0.5MB/min (~30MB/hr)
+        recorder.setAudioSamplingRate(sampleRate);
+        recorder.setAudioEncodingBitRate(bitRate);
         recorder.setAudioChannels(1);
         recorder.setOutputFile(outputPath);
 

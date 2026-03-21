@@ -916,12 +916,22 @@
     if (isNative) {
       // Use new method with image filenames
       const imageList = imageFiles.join(',');
-      const size = await new Promise((resolve, reject) => {
+      const result = await new Promise((resolve, reject) => {
         const cb = 'qnZip' + Date.now();
-        window[cb] = (size) => { delete window[cb]; size > 0 ? resolve(size) : reject(new Error('ZIP build failed')); };
+        window[cb] = (resp) => {
+          delete window[cb];
+          if (typeof resp === 'object' && resp.parts) {
+            // Split ZIP response
+            resolve({ size: resp.size, parts: resp.parts });
+          } else if (typeof resp === 'number' && resp > 0) {
+            resolve({ size: resp, parts: 1 });
+          } else {
+            reject(new Error('ZIP build failed'));
+          }
+        };
         NativeBridge.buildZipAndSaveWithImages(md, analysis, session.nativeAudioFile || '', session.transcription || '', imageList, zipFilename, cb);
       });
-      return { zipFilename, fileSize: size, native: true };
+      return { zipFilename, fileSize: result.size, parts: result.parts, native: true };
     }
     const enc = new TextEncoder();
     const files = [
@@ -976,31 +986,50 @@
       return;
     }
 
-    showToast('\u6B63\u5728\u6253\u5305...', 60000);
+    showToast('正在打包...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
-        await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
-        showToast('\u5DF2\u4FDD\u5B58: ' + result.zipFilename);
+        if (result.parts > 1) {
+          showToast(`文件已分为 ${result.parts} 份 (每份≤95MB)`, 3000);
+          for (let i = 1; i <= result.parts; i++) {
+            const partName = result.zipFilename.replace('.zip', `_part${i}.zip`);
+            await saveExportRecord(currentSession, partName, 0);
+          }
+        } else {
+          await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
+          showToast('已保存: ' + result.zipFilename);
+        }
       } else {
         await saveExport(currentSession, result.blob, result.zipFilename);
         await downloadBlob(result.blob, result.zipFilename);
       }
     } catch(e) {
       document.querySelector('.toast')?.remove();
-      showToast('\u5BFC\u51FA\u5931\u8D25: ' + e.message);
+      showToast('导出失败: ' + e.message);
       console.error(e);
     }
   }
 
   async function shareSession() {
     if (!currentSession) return;
-    showToast('\u6B63\u5728\u6253\u5305...', 60000);
+    showToast('正在打包...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
+        if (result.parts > 1) {
+          // Share parts one by one
+          for (let i = 1; i <= result.parts; i++) {
+            const partName = result.zipFilename.replace('.zip', `_part${i}.zip`);
+            await saveExportRecord(currentSession, partName, 0);
+            showToast(`分享第 ${i}/${result.parts} 份...`, 5000);
+            NativeBridge.shareFile(partName);
+            if (i < result.parts) await new Promise(r => setTimeout(r, 2000));
+          }
+          return;
+        }
         await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
         NativeBridge.shareFile(result.zipFilename);
         return;

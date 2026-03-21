@@ -204,9 +204,15 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void startNativeRecording(String filename) {
+            startNativeRecordingWithQuality(filename, "standard");
+        }
+
+        @JavascriptInterface
+        public void startNativeRecordingWithQuality(String filename, String quality) {
             Intent intent = new Intent(MainActivity.this, RecordingService.class);
             intent.setAction(RecordingService.ACTION_START);
             intent.putExtra(RecordingService.EXTRA_FILE, filename);
+            intent.putExtra(RecordingService.EXTRA_QUALITY, quality);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
             } else {

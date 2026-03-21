@@ -61,8 +61,8 @@ public class RecordingService extends Service {
         recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        recorder.setAudioSamplingRate(44100);
-        recorder.setAudioEncodingBitRate(128000);
+        recorder.setAudioSamplingRate(16000);    // 16kHz: optimal for speech, compatible with Whisper
+        recorder.setAudioEncodingBitRate(64000);  // 64kbps: clear speech, ~0.5MB/min (~30MB/hr)
         recorder.setAudioChannels(1);
         recorder.setOutputFile(outputPath);
 

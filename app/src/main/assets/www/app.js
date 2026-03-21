@@ -118,7 +118,7 @@
 
   // --- Settings ---
   const DEFAULT_SETTINGS = {
-    audioQuality: '44100',
+    audioQuality: 'standard',
     autoStop: '0',
     exportFormat: 'zip',
     stealthMode: 'off',
@@ -515,7 +515,8 @@
 
     if (isNative) {
       const audioFilename = id + '_recording.m4a';
-      NativeBridge.startNativeRecording(audioFilename);
+      const recQuality = settings.audioQuality || 'standard';
+      NativeBridge.startNativeRecordingWithQuality(audioFilename, recQuality);
       currentSession.nativeAudioFile = audioFilename;
       currentSession.hasAudio = true;
     } else {
@@ -1014,13 +1015,35 @@
 
   async function shareSession() {
     if (!currentSession) return;
+    const settings = loadSettings();
+
+    // Text-only mode: share markdown file
+    if (settings.exportFormat === 'text') {
+      showToast('正在导出...', 60000);
+      try {
+        const text = await buildNotesText(currentSession);
+        document.querySelector('.toast')?.remove();
+        const filename = sanitizeFilename(currentSession.title) + '_notes.md';
+        if (isNative) {
+          NativeBridge.saveText(filename, text);
+          NativeBridge.shareTextFile(filename);
+        } else {
+          const blob = new Blob([text], { type: 'text/markdown' });
+          await downloadBlob(blob, filename);
+        }
+      } catch(e) {
+        document.querySelector('.toast')?.remove();
+        showToast('分享失败: ' + e.message);
+      }
+      return;
+    }
+
     showToast('正在打包...', 60000);
     try {
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
         if (result.parts > 1) {
-          // Share parts one by one
           for (let i = 1; i <= result.parts; i++) {
             const partName = result.zipFilename.replace('.zip', `_part${i}.zip`);
             await saveExportRecord(currentSession, partName, 0);

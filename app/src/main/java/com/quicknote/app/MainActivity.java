@@ -377,8 +377,34 @@ public class MainActivity extends Activity {
 
                     zos.close();
                     long size = zipFile.length();
-                    runOnUiThread(() -> webView.evaluateJavascript(
+                    long MAX_PART = 95L * 1024 * 1024; // 95MB per part
+
+                    if (size > MAX_PART) {
+                        // Split into parts
+                        int partCount = (int) Math.ceil((double) size / MAX_PART);
+                        FileInputStream splitIn = new FileInputStream(zipFile);
+                        byte[] buf2 = new byte[65536];
+                        for (int part = 1; part <= partCount; part++) {
+                            String partName = zipFilename.replace(".zip", "_part" + part + ".zip");
+                            File partFile = new File(dir, partName);
+                            FileOutputStream partOut = new FileOutputStream(partFile);
+                            long written = 0;
+                            int len2;
+                            while (written < MAX_PART && (len2 = splitIn.read(buf2)) > 0) {
+                                partOut.write(buf2, 0, len2);
+                                written += len2;
+                            }
+                            partOut.close();
+                        }
+                        splitIn.close();
+                        // Callback with negative size = number of parts
+                        final int pc = partCount;
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "window['" + callbackFn + "']({size:" + size + ",parts:" + pc + "})", null));
+                    } else {
+                        runOnUiThread(() -> webView.evaluateJavascript(
                             "window['" + callbackFn + "'](" + size + ")", null));
+                    }
                 } catch (Exception e) {
                     e.printStackTrace();
                     runOnUiThread(() -> webView.evaluateJavascript(

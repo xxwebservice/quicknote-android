@@ -2003,6 +2003,32 @@
       navigateBack('start-screen');
     };
 
+    // Haptic feedback on button taps
+    document.addEventListener('click', e => {
+      if (e.target.closest('button, .session-card, .export-card, .settings-item')) {
+        if (navigator.vibrate) navigator.vibrate(5);
+      }
+    });
+
+    // Material ripple effect on interactive elements
+    function addRipple(event) {
+      const el = event.currentTarget;
+      const ripple = document.createElement('span');
+      const rect = el.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height);
+      const x = (event.touches ? event.touches[0].clientX : event.clientX) - rect.left - size / 2;
+      const y = (event.touches ? event.touches[0].clientY : event.clientY) - rect.top - size / 2;
+      ripple.className = 'ripple';
+      ripple.style.width = ripple.style.height = size + 'px';
+      ripple.style.left = x + 'px';
+      ripple.style.top = y + 'px';
+      el.appendChild(ripple);
+      ripple.addEventListener('animationend', () => ripple.remove());
+    }
+    document.querySelectorAll('.ripple-target').forEach(el => {
+      el.addEventListener('touchstart', addRipple, { passive: true });
+    });
+
     // Check for interrupted session recovery
     checkForRecovery();
   }

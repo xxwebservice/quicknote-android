@@ -46,26 +46,10 @@ jobs:
         gradle wrapper --gradle-version 8.5
         chmod +x gradlew
 
-    - name: Generate signing keystore
+    - name: Setup fixed signing keystore
       run: |
-        # Generate a keystore with fixed credentials (same key every build)
-        # The keystore file itself differs but credentials are the same,
-        # and Gradle will sign with this config for consistent signatures.
-        # To ensure truly identical signatures across builds, we use a
-        # committed keystore. If not present, generate one.
-        if [ ! -f app/quicknote.keystore ]; then
-          keytool -genkeypair \
-            -keystore app/quicknote.keystore \
-            -storepass quicknote2026 -keypass quicknote2026 \
-            -alias quicknote -keyalg RSA -keysize 2048 -validity 36500 \
-            -dname "CN=QuickNote,OU=Dev,O=QuickNote,L=SH,ST=SH,C=CN"
-          # Commit the keystore back to repo for future builds
-          git config user.name "CI Bot"
-          git config user.email "ci@quicknote.app"
-          git add app/quicknote.keystore
-          git commit -m "ci: add fixed signing keystore" || true
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main || true
-        fi
+        # Decode embedded PKCS12 keystore (same key every build = consistent signature)
+        echo "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" | base64 -d > app/quicknote.keystore
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace

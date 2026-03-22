@@ -32,6 +32,7 @@ android {
             storePassword "quicknote2026"
             keyAlias "quicknote"
             keyPassword "quicknote2026"
+            storeType "PKCS12"
         }
     }
 

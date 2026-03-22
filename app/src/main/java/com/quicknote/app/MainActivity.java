@@ -643,35 +643,79 @@ public class MainActivity extends Activity {
             return dir;
         }
 
+        /** Save backup with timestamp filename to Documents/QuickNote/backups/ */
         @JavascriptInterface
-        public boolean saveBackup(String jsonData) {
+        public String saveBackup(String jsonData) {
             try {
-                // Save to PUBLIC Documents/QuickNote/ so it survives uninstall
-                File backup = new File(getBackupDir(), "quicknote_backup.json");
+                File backupDir = new File(getBackupDir(), "backups");
+                if (!backupDir.exists()) backupDir.mkdirs();
+                // Timestamp filename: quicknote_backup_20260322_143000.json
+                String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                    .format(new java.util.Date());
+                String filename = "quicknote_backup_" + ts + ".json";
+                File backup = new File(backupDir, filename);
                 FileOutputStream fos = new FileOutputStream(backup);
                 fos.write(jsonData.getBytes("UTF-8"));
                 fos.close();
-                // Also save a copy to app-private dir as fallback
-                File privateBackup = new File(getExternalFilesDir("QuickNote"), "quicknote_backup.json");
-                FileOutputStream fos2 = new FileOutputStream(privateBackup);
-                fos2.write(jsonData.getBytes("UTF-8"));
-                fos2.close();
                 final String path = backup.getAbsolutePath();
                 runOnUiThread(() ->
-                    Toast.makeText(MainActivity.this, "备份已保存到: " + path, Toast.LENGTH_LONG).show());
-                return true;
-            } catch (Exception e) { e.printStackTrace(); return false; }
+                    Toast.makeText(MainActivity.this, "备份已保存: " + path, Toast.LENGTH_LONG).show());
+                return path; // return full path for confirmation
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "";
+            }
         }
 
+        /** List all backup files with name and size, sorted newest first */
         @JavascriptInterface
-        public String loadBackup() {
+        public String listBackups() {
             try {
-                // Try public Documents first (survives uninstall)
-                File backup = new File(getBackupDir(), "quicknote_backup.json");
-                if (!backup.exists()) {
-                    // Fallback to app-private dir
-                    backup = new File(getExternalFilesDir("QuickNote"), "quicknote_backup.json");
+                JSONArray arr = new JSONArray();
+                // Scan Documents/QuickNote/backups/
+                File backupDir = new File(getBackupDir(), "backups");
+                if (backupDir.exists()) {
+                    File[] files = backupDir.listFiles((d, name) -> name.endsWith(".json"));
+                    if (files != null) {
+                        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+                        for (File f : files) {
+                            JSONObject obj = new JSONObject();
+                            obj.put("name", f.getName());
+                            obj.put("path", f.getAbsolutePath());
+                            obj.put("size", f.length());
+                            obj.put("modified", f.lastModified());
+                            arr.put(obj);
+                        }
+                    }
                 }
+                // Also check legacy locations
+                File legacy1 = new File(getBackupDir(), "quicknote_backup.json");
+                if (legacy1.exists()) {
+                    JSONObject obj = new JSONObject();
+                    obj.put("name", "quicknote_backup.json (旧版)");
+                    obj.put("path", legacy1.getAbsolutePath());
+                    obj.put("size", legacy1.length());
+                    obj.put("modified", legacy1.lastModified());
+                    arr.put(obj);
+                }
+                File legacy2 = new File(getExternalFilesDir("QuickNote"), "quicknote_backup.json");
+                if (legacy2.exists()) {
+                    JSONObject obj = new JSONObject();
+                    obj.put("name", "quicknote_backup.json (应用内)");
+                    obj.put("path", legacy2.getAbsolutePath());
+                    obj.put("size", legacy2.length());
+                    obj.put("modified", legacy2.lastModified());
+                    arr.put(obj);
+                }
+                return arr.toString();
+            } catch (Exception e) { e.printStackTrace(); return "[]"; }
+        }
+
+        /** Load a specific backup file by path */
+        @JavascriptInterface
+        public String loadBackup(String filePath) {
+            try {
+                File backup = new File(filePath);
                 if (!backup.exists()) return "";
                 FileInputStream fis = new FileInputStream(backup);
                 byte[] data = new byte[(int) backup.length()];
@@ -679,6 +723,18 @@ public class MainActivity extends Activity {
                 fis.close();
                 return new String(data, "UTF-8");
             } catch (Exception e) { e.printStackTrace(); return ""; }
+        }
+
+        /** Legacy: load most recent backup (backward compat) */
+        @JavascriptInterface
+        public String loadLatestBackup() {
+            try {
+                String list = listBackups();
+                JSONArray arr = new JSONArray(list);
+                if (arr.length() == 0) return "";
+                String path = arr.getJSONObject(0).getString("path");
+                return loadBackup(path);
+            } catch (Exception e) { return ""; }
         }
 
         // ── Debug Log ───────────────────────────────────────────────────
@@ -886,11 +942,20 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        // Let JS handle navigation (screen stack) instead of WebView history
+        webView.evaluateJavascript(
+            "(function(){" +
+            "  if(typeof window.__qnHandleBack==='function'){" +
+            "    window.__qnHandleBack();" +
+            "  } else { return 'exit'; }" +
+            "})()",
+            result -> {
+                if ("\"exit\"".equals(result)) {
+                    // JS says no more screens to go back to — minimize app
+                    moveTaskToBack(true);
+                }
+            }
+        );
     }
 
     @Override

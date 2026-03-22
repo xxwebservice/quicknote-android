@@ -21,15 +21,15 @@
       </div>
       <div class="header-right">
         <span id="timer" class="timer hidden">00:00</span>
-        <button id="stop-btn" class="stop-header-btn hidden">完成</button>
-        <button id="menu-btn" class="icon-btn" aria-label="Menu">&#8942;</button>
+        <button id="stop-btn" class="stop-header-btn ripple-target hidden">完成</button>
+        <button id="menu-btn" class="icon-btn ripple-target" aria-label="Menu">&#8942;</button>
       </div>
     </header>
 
     <div id="menu-dropdown" class="menu-dropdown hidden">
-      <button id="menu-history" class="menu-item">历史记录</button>
-      <button id="menu-exports" class="menu-item">已导出文件</button>
-      <button id="menu-settings" class="menu-item">
+      <button id="menu-history" class="menu-item ripple-target">历史记录</button>
+      <button id="menu-exports" class="menu-item ripple-target">已导出文件</button>
+      <button id="menu-settings" class="menu-item ripple-target">
         <span class="menu-item-icon">&#9881;</span>设置
       </button>
     </div>
@@ -42,13 +42,13 @@
           <div class="title-input-wrap">
             <input type="text" id="meeting-title" class="meeting-title-input" placeholder="输入会议主题" autocomplete="off">
           </div>
-          <button id="start-btn" class="start-btn">开始记录</button>
+          <button id="start-btn" class="start-btn ripple-target">开始记录</button>
           <p class="hint-text">点击开始后可同时记笔记</p>
         </div>
         <div id="recent-sessions" class="recent-sessions">
           <div class="section-header">
             <h3 class="section-title">最近记录</h3>
-            <button id="view-all-btn" class="view-all-link">查看全部 &rsaquo;</button>
+            <button id="view-all-btn" class="view-all-link ripple-target">查看全部 &rsaquo;</button>
           </div>
           <div id="session-list" class="session-list"></div>
         </div>
@@ -66,20 +66,20 @@
           </div>
           <div class="input-row">
             <div class="format-toolbar">
-              <button class="fmt-btn" data-fmt="bullet" title="列表">•</button>
-              <button class="fmt-btn" data-fmt="bold" title="加粗">B</button>
-              <button class="fmt-btn" data-fmt="heading" title="标题">H</button>
-              <button class="fmt-btn" data-fmt="action" title="待办">☐</button>
-              <button class="fmt-btn" data-fmt="highlight" title="高亮">✦</button>
+              <button class="fmt-btn ripple-target" data-fmt="bullet" title="列表">•</button>
+              <button class="fmt-btn ripple-target" data-fmt="bold" title="加粗">B</button>
+              <button class="fmt-btn ripple-target" data-fmt="heading" title="标题">H</button>
+              <button class="fmt-btn ripple-target" data-fmt="action" title="待办">☐</button>
+              <button class="fmt-btn ripple-target" data-fmt="highlight" title="高亮">✦</button>
               <span class="fmt-sep"></span>
-              <button class="fmt-btn" id="camera-btn" title="拍照">&#128247;</button>
-              <button class="fmt-btn" id="gallery-btn" title="图片">&#128444;</button>
+              <button class="fmt-btn ripple-target" id="camera-btn" title="拍照">&#128247;</button>
+              <button class="fmt-btn ripple-target" id="gallery-btn" title="图片">&#128444;</button>
               <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none">
               <input type="file" id="gallery-input" accept="image/*" style="display:none">
             </div>
             <div class="input-group">
               <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="2"></textarea>
-              <button id="send-btn" class="send-btn" disabled>&#8593;</button>
+              <button id="send-btn" class="send-btn ripple-target" disabled>&#8593;</button>
             </div>
           </div>
         </div>
@@ -100,21 +100,21 @@
           </div>
         </div>
         <div class="review-action-bar">
-          <button id="export-btn" class="action-btn primary">导出 ZIP</button>
-          <button id="share-btn" class="action-btn outlined">分享</button>
+          <button id="export-btn" class="action-btn primary ripple-target">导出 ZIP</button>
+          <button id="share-btn" class="action-btn outlined ripple-target">分享</button>
           <div id="transcribe-action-row" class="hidden" style="display:contents">
-            <button id="transcribe-entry-btn" class="action-btn transcribe-btn">本地转录</button>
+            <button id="transcribe-entry-btn" class="action-btn transcribe-btn ripple-target">本地转录</button>
           </div>
         </div>
         <div class="review-footer">
-          <button id="new-btn" class="new-record-link">新建记录</button>
+          <button id="new-btn" class="new-record-link ripple-target">新建记录</button>
         </div>
       </div>
 
       <!-- History -->
       <div id="history-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-btn" class="icon-btn">&larr;</button>
+          <button id="back-btn" class="icon-btn ripple-target">&larr;</button>
           <h2>历史记录</h2>
         </div>
         <div class="list-screen-body">
@@ -125,7 +125,7 @@
       <!-- Exports -->
       <div id="exports-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-exports" class="icon-btn">&larr;</button>
+          <button id="back-from-exports" class="icon-btn ripple-target">&larr;</button>
           <h2>已导出文件</h2>
         </div>
         <div class="list-screen-body">
@@ -136,7 +136,7 @@
       <!-- Settings -->
       <div id="settings-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-settings" class="icon-btn">&larr;</button>
+          <button id="back-from-settings" class="icon-btn ripple-target">&larr;</button>
           <h2>设置</h2>
         </div>
         <div class="list-screen-body">
@@ -145,7 +145,7 @@
           <p class="section-title" style="margin-bottom:8px">录音设置</p>
 
           <div class="settings-group">
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>录音质量</span>
               </div>
@@ -155,7 +155,7 @@
                 <option value="high">高清 (~84MB/小时)</option>
               </select>
             </div>
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>自动停止录音</span>
               </div>
@@ -166,7 +166,7 @@
                 <option value="120">120 分钟</option>
               </select>
             </div>
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>导出格式</span>
               </div>
@@ -175,7 +175,7 @@
                 <option value="text">仅笔记文本</option>
               </select>
             </div>
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>隐蔽模式</span>
                 <span class="settings-hint-text">隐藏计时器和录音状态</span>
@@ -189,7 +189,7 @@
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">存储</p>
           <div class="settings-group">
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>存储位置</span>
                 <span class="settings-hint-text" id="storage-path-display">加载中...</span>
@@ -200,7 +200,7 @@
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">语音转录</p>
           <p class="settings-hint">填入API Key即可使用云端转录（推荐Groq，免费且极快）。无需下载模型。</p>
           <div class="settings-group" style="margin-top:12px">
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>转录服务</span>
               </div>
@@ -224,36 +224,36 @@
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">数据管理</p>
           <div class="settings-group">
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>备份全部数据</span>
                 <span class="settings-hint-text">会议记录、设置、笔记全部导出到本地</span>
               </div>
-              <button id="backup-btn" class="settings-action-btn">备份</button>
+              <button id="backup-btn" class="settings-action-btn ripple-target">备份</button>
             </div>
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>恢复数据</span>
                 <span class="settings-hint-text">从本地备份文件恢复</span>
               </div>
-              <button id="restore-btn" class="settings-action-btn">恢复</button>
+              <button id="restore-btn" class="settings-action-btn ripple-target">恢复</button>
             </div>
           </div>
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">关于</p>
           <div class="settings-group">
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>QuickNote</span>
-                <span class="settings-hint-text" id="version-display">v3.5</span>
+                <span class="settings-hint-text" id="version-display">v3.6</span>
               </div>
             </div>
-            <div class="settings-item">
+            <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>调试信息</span>
                 <span class="settings-hint-text" id="debug-info-display">点击查看</span>
               </div>
-              <button id="debug-info-btn" class="settings-action-btn">查看</button>
+              <button id="debug-info-btn" class="settings-action-btn ripple-target">查看</button>
             </div>
           </div>
           <div style="height:40px"></div>
@@ -264,14 +264,14 @@
       <!-- Transcription -->
       <div id="transcription-screen" class="screen">
         <div class="list-screen-header">
-          <button id="back-from-transcription" class="icon-btn">&larr;</button>
+          <button id="back-from-transcription" class="icon-btn ripple-target">&larr;</button>
           <h2>本地转录</h2>
         </div>
         <div class="list-screen-body">
 
           <div id="transcription-no-model" class="transcription-no-model hidden">
             <p>还没有下载转录模型。</p>
-            <button id="go-to-settings-btn" class="action-btn primary" style="margin-top:12px">前往设置下载模型</button>
+            <button id="go-to-settings-btn" class="action-btn primary ripple-target" style="margin-top:12px">前往设置下载模型</button>
           </div>
 
           <div id="transcription-has-model">
@@ -295,8 +295,8 @@
             </div>
 
             <div style="display:flex;gap:10px;margin-top:16px">
-              <button id="transcribe-btn" class="action-btn primary" style="flex:1">开始转录</button>
-              <button id="cancel-transcribe-btn" class="action-btn" style="flex:1;display:none">取消</button>
+              <button id="transcribe-btn" class="action-btn primary ripple-target" style="flex:1">开始转录</button>
+              <button id="cancel-transcribe-btn" class="action-btn ripple-target" style="flex:1;display:none">取消</button>
             </div>
           </div>
 
@@ -308,12 +308,12 @@
           <div id="transcription-result" class="transcription-result hidden" style="margin-top:16px">
             <div class="result-header-row">
               <span class="section-title">转录结果</span>
-              <button id="copy-transcript-btn" class="copy-btn">复制</button>
+              <button id="copy-transcript-btn" class="copy-btn ripple-target">复制</button>
             </div>
             <div id="transcript-text" class="transcript-text"></div>
             <div class="merge-action-row">
-              <button id="merge-notes-btn" class="action-btn merge-btn">&#128203; 融合笔记</button>
-              <button id="share-merged-btn" class="action-btn merge-share-btn hidden">分享文档</button>
+              <button id="merge-notes-btn" class="action-btn merge-btn ripple-target">&#128203; 融合笔记</button>
+              <button id="share-merged-btn" class="action-btn merge-share-btn ripple-target hidden">分享文档</button>
             </div>
           </div>
 

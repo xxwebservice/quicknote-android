@@ -1909,45 +1909,72 @@
       if (currentSession && recordingStartTime) saveActiveSession();
     });
 
-    // Backup button
+    // Backup button — save with timestamp, show path
     $('#backup-btn')?.addEventListener('click', () => {
       const data = {
         sessions: JSON.parse(localStorage.getItem('quicknote_sessions') || '[]'),
         settings: JSON.parse(localStorage.getItem('quicknote_settings') || '{}'),
-        version: '2.4',
+        version: '3.5',
         exportedAt: new Date().toISOString(),
+        sessionCount: sessions.length,
       };
       const json = JSON.stringify(data, null, 2);
       if (isNative) {
-        NativeBridge.saveBackup(json);
+        const path = NativeBridge.saveBackup(json);
+        if (path) {
+          showToast('备份完成: ' + path, 4000);
+        } else {
+          showToast('备份失败', 2000);
+        }
       } else {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const blob = new Blob([json], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'quicknote_backup.json';
+        a.download = `quicknote_backup_${ts}.json`;
         a.click();
+        showToast('备份已下载');
       }
-      showToast('数据已备份');
     });
 
-    // Restore button
+    // Restore button — list available backups and let user choose
     $('#restore-btn')?.addEventListener('click', () => {
-      let json = '';
-      if (isNative) {
-        json = NativeBridge.loadBackup();
-      }
-      if (!json) { showToast('未找到备份文件'); return; }
+      if (!isNative) { showToast('仅支持安卓原生'); return; }
+      let backups;
       try {
+        backups = JSON.parse(NativeBridge.listBackups());
+      } catch(e) { backups = []; }
+      if (!backups.length) {
+        showToast('未找到任何备份文件\n路径: Documents/QuickNote/backups/', 3000);
+        return;
+      }
+      // Build selection dialog
+      let msg = '选择要恢复的备份:\n\n';
+      backups.forEach((b, i) => {
+        const date = new Date(b.modified).toLocaleString('zh-CN');
+        const sizeKB = Math.round(b.size / 1024);
+        msg += `[${i + 1}] ${date} (${sizeKB}KB)\n`;
+      });
+      msg += '\n输入编号 (1-' + backups.length + '):';
+      const choice = prompt(msg);
+      if (!choice) return;
+      const idx = parseInt(choice) - 1;
+      if (idx < 0 || idx >= backups.length) { showToast('无效选择'); return; }
+      const selected = backups[idx];
+      try {
+        const json = NativeBridge.loadBackup(selected.path);
+        if (!json) { showToast('读取备份失败'); return; }
         const data = JSON.parse(json);
-        if (!data.sessions) throw new Error('invalid backup');
-        if (!confirm(`发现备份 (${data.sessions.length}条记录, ${data.exportedAt || '未知时间'})。\n恢复将覆盖当前数据，确定？`)) return;
+        if (!data.sessions) throw new Error('invalid');
+        const date = new Date(selected.modified).toLocaleString('zh-CN');
+        if (!confirm(`恢复备份:\n${date}\n${data.sessions.length} 条记录\n\n将覆盖当前数据，确定？`)) return;
         localStorage.setItem('quicknote_sessions', JSON.stringify(data.sessions));
         if (data.settings) localStorage.setItem('quicknote_settings', JSON.stringify(data.settings));
         loadSessions();
         renderSessionList(dom.sessionList, false);
         applySettingsToUI();
-        showToast(`已恢复 ${data.sessions.length} 条记录`);
-      } catch(e) { showToast('备份文件格式错误'); }
+        showToast(`已恢复 ${data.sessions.length} 条记录`, 3000);
+      } catch(e) { showToast('备份文件格式错误: ' + e.message); }
     });
 
     // Debug info button
@@ -1963,6 +1990,18 @@
 
     // Load initial settings
     applySettingsToUI();
+
+    // Android hardware back button handler
+    window.__qnHandleBack = function() {
+      if (currentScreenId === 'start-screen') {
+        return 'exit'; // at home screen, let Android handle (minimize)
+      }
+      if (recordingStartTime && currentScreenId === 'notes-screen') {
+        // Recording in progress — don't navigate away, just ignore back
+        return;
+      }
+      navigateBack('start-screen');
+    };
 
     // Check for interrupted session recovery
     checkForRecovery();

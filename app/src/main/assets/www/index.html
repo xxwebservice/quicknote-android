@@ -64,26 +64,31 @@
           <div id="notes-entries" class="notes-entries">
             <div id="empty-hint" class="empty-hint">在下方输入笔记要点，Shift+回车提交...</div>
           </div>
-          <div class="input-row">
-            <div class="input-main">
-              <div class="input-actions-left">
-                <button class="input-icon-btn ripple-target" id="camera-btn" title="拍照">&#128247;</button>
-                <button class="input-icon-btn ripple-target" id="gallery-btn" title="图片">&#128444;</button>
-                <button class="input-icon-btn ripple-target" id="fmt-toggle-btn" title="格式">Aa</button>
-              </div>
-              <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="1"></textarea>
-              <button id="send-btn" class="send-btn ripple-target" disabled>&#8593;</button>
+          <!-- Action Bar (Zone 1) -->
+          <div class="input-action-bar" id="input-action-bar">
+            <div class="action-bar-left">
+              <button class="action-bar-btn ripple-target" id="camera-btn">&#128247;</button>
+              <button class="action-bar-btn ripple-target" id="gallery-btn">&#128444;</button>
             </div>
-            <div class="format-toolbar hidden" id="format-toolbar">
-              <button class="fmt-btn ripple-target" data-fmt="bullet">•</button>
-              <button class="fmt-btn ripple-target" data-fmt="bold">B</button>
-              <button class="fmt-btn ripple-target" data-fmt="heading">H</button>
-              <button class="fmt-btn ripple-target" data-fmt="action">☐</button>
-              <button class="fmt-btn ripple-target" data-fmt="highlight">✦</button>
+            <div class="action-bar-right">
+              <button class="action-bar-btn fmt-toggle ripple-target" id="fmt-toggle-btn">Aa</button>
             </div>
-            <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none">
-            <input type="file" id="gallery-input" accept="image/*" style="display:none">
           </div>
+          <!-- Format sub-bar (hidden, replaces action bar when toggled) -->
+          <div class="format-sub-bar hidden" id="format-toolbar">
+            <button class="fmt-chip ripple-target" data-fmt="bullet">• 列表</button>
+            <button class="fmt-chip ripple-target" data-fmt="bold">B 加粗</button>
+            <button class="fmt-chip ripple-target" data-fmt="heading"># 标题</button>
+            <button class="fmt-chip ripple-target" data-fmt="action">☐ 待办</button>
+            <button class="fmt-chip ripple-target" data-fmt="highlight">✦ 高亮</button>
+          </div>
+          <!-- Input Row (Zone 2) -->
+          <div class="input-row">
+            <textarea id="note-input" class="note-input" placeholder="记一条笔记..." rows="3"></textarea>
+            <button id="send-btn" class="send-btn ripple-target" disabled>&#8593;</button>
+          </div>
+          <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none">
+          <input type="file" id="gallery-input" accept="image/*" style="display:none">
         </div>
       </div>
 
@@ -247,7 +252,7 @@
             <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>QuickNote</span>
-                <span class="settings-hint-text" id="version-display">v3.8</span>
+                <span class="settings-hint-text" id="version-display">v3.9</span>
               </div>
             </div>
             <div class="settings-item ripple-target">

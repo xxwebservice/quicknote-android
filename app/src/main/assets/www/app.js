@@ -726,8 +726,12 @@
     dom.noteInput.value = '';
     dom.sendBtn.disabled = true;
     autoResize();
-    dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
-    saveActiveSession(); // real-time save after every note
+    // Scroll to bottom smoothly, then refocus input without losing position
+    requestAnimationFrame(() => {
+      dom.notesEntries.scrollTop = dom.notesEntries.scrollHeight;
+      dom.noteInput.focus();
+    });
+    saveActiveSession();
   }
 
   /** Render note text with inline markdown formatting */
@@ -754,42 +758,38 @@
       entry.innerHTML = `
         <span class="note-timestamp">${formatTimestamp(note.timestamp)}</span>
         <div class="note-image">
-          ${imgSrc ? `<img src="${imgSrc}" alt="photo" data-file="${escapeHtml(note.imageFile || '')}">` : `<span style="color:var(--text-muted)">[图片]</span>`}
-          <div class="note-img-actions">
-            <button class="img-action-btn" data-action="view" data-file="${escapeHtml(note.imageFile || '')}">查看</button>
-            <button class="img-action-btn" data-action="edit" data-file="${escapeHtml(note.imageFile || '')}">编辑标注</button>
-          </div>
+          ${imgSrc ? `<img src="${imgSrc}" alt="">` : `<span style="color:var(--text-muted)">📷</span>`}
+          <div class="note-img-actions"><span class="img-action-btn" data-action="edit">标注</span></div>
         </div>`;
-      // Image action buttons
-      entry.querySelectorAll('.img-action-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-          e.stopPropagation();
-          const file = btn.dataset.file;
-          if (!file || !isNative) return;
-          if (btn.dataset.action === 'edit') {
-            // Open editor with callback to refresh the image on return
+      // Tap image → view full screen
+      const img = entry.querySelector('img');
+      if (img && note.imageFile && isNative) {
+        img.addEventListener('click', () => NativeBridge.openImageViewer(note.imageFile));
+        // Long-press → edit/annotate
+        let longTimer;
+        img.addEventListener('touchstart', () => {
+          longTimer = setTimeout(() => {
             const cb = 'qnEdit' + Date.now();
             window[cb] = function(result) {
               delete window[cb];
-              if (result && result.dataUrl) {
-                // Update the image in the DOM
-                const img = entry.querySelector('img');
-                if (img) img.src = result.dataUrl;
-                // Update the note's cached dataUrl
-                note.imageDataUrl = result.dataUrl;
-                showToast('照片已更新');
-              }
+              if (result && result.dataUrl) { img.src = result.dataUrl; note.imageDataUrl = result.dataUrl; }
             };
-            NativeBridge.openImageEditor(file, cb);
-          } else {
-            NativeBridge.openImageViewer(file);
-          }
-        });
-      });
-      // Tap image itself to view
-      const img = entry.querySelector('img');
-      if (img) img.addEventListener('click', () => {
-        if (note.imageFile && isNative) NativeBridge.openImageViewer(note.imageFile);
+            NativeBridge.openImageEditor(note.imageFile, cb);
+          }, 500);
+        }, { passive: true });
+        img.addEventListener('touchend', () => clearTimeout(longTimer), { passive: true });
+        img.addEventListener('touchmove', () => clearTimeout(longTimer), { passive: true });
+      }
+      // "标注" link
+      entry.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!note.imageFile || !isNative) return;
+        const cb = 'qnEdit' + Date.now();
+        window[cb] = function(result) {
+          delete window[cb];
+          if (result && result.dataUrl) { const im = entry.querySelector('img'); if (im) im.src = result.dataUrl; note.imageDataUrl = result.dataUrl; }
+        };
+        NativeBridge.openImageEditor(note.imageFile, cb);
       });
     } else {
       entry.innerHTML = `
@@ -1569,8 +1569,8 @@
 
   function autoResize() {
     const el = dom.noteInput;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    el.style.height = '40px'; // reset to single line
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
   let wakeLock = null;
@@ -1602,7 +1602,15 @@
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 
-    // Format toolbar
+    // Format toolbar toggle
+    const fmtToggle = $('#fmt-toggle-btn');
+    const fmtBar = $('#format-toolbar');
+    fmtToggle?.addEventListener('click', () => {
+      fmtBar?.classList.toggle('hidden');
+      fmtToggle.classList.toggle('active', !fmtBar?.classList.contains('hidden'));
+    });
+
+    // Format toolbar actions
     document.querySelector('.format-toolbar')?.addEventListener('click', e => {
       const btn = e.target.closest('[data-fmt]');
       if (!btn) return;

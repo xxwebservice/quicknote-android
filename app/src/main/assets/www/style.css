@@ -641,113 +641,123 @@ header {
 .note-text .note-action::before { content: '\2610 '; color: var(--accent); }
 .note-text .note-highlight { background: #E8F0FE; padding: 0 3px; border-radius: 2px; }
 
-/* Input row — compact, camera-first layout */
-.input-row {
-  padding: var(--space-2) var(--space-3);
-  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
-  background: var(--bg);
-  flex-shrink: 0;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-}
+/* === Input Zone: Two-row layout (Action Bar + Input Row) === */
 
-/* Main input line: [camera] [gallery] [Aa] [____input____] [send] */
-.input-main {
+/* Zone 1: Action Bar — camera/gallery left, format right */
+.input-action-bar {
   display: flex;
-  gap: 6px;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px var(--space-4);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
+  flex-shrink: 0;
+  min-height: 40px;
 }
-.input-actions-left {
+.action-bar-left, .action-bar-right {
   display: flex;
   gap: 2px;
   align-items: center;
-  flex-shrink: 0;
-  padding-bottom: 4px;
 }
-.input-icon-btn {
-  background: none;
-  border: none;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: 18px;
-  padding: 6px;
-  min-width: 36px;
-  min-height: 36px;
+.action-bar-btn {
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--md-sys-shape-full);
+  background: none;
+  border: none;
+  border-radius: var(--md-sys-shape-small);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 20px;
   cursor: pointer;
-  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s;
 }
-.input-icon-btn:active { background: var(--md-sys-color-surface-container); }
-#fmt-toggle-btn {
-  font-size: 13px;
+.action-bar-btn:active { background: var(--md-sys-color-surface-container); }
+.fmt-toggle {
+  font-size: 14px;
   font-weight: 600;
   color: var(--md-sys-color-outline);
 }
-#fmt-toggle-btn.active {
+.fmt-toggle.active {
   color: var(--md-sys-color-primary);
   background: var(--md-sys-color-primary-container);
+  border-radius: var(--md-sys-shape-small);
 }
 
-.note-input {
-  flex: 1;
-  padding: 10px var(--space-4);
-  border: 1.5px solid var(--md-sys-color-outline-variant);
-  border-radius: 22px;
-  font-size: 15px;
-  font-family: inherit;
-  color: var(--text);
-  background: var(--md-sys-color-surface-container-lowest);
-  outline: none;
-  resize: none;
-  max-height: 120px;
-  min-height: 40px;
-  line-height: 1.4;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.note-input:focus {
-  border-color: var(--md-sys-color-primary);
-  box-shadow: 0 0 0 2px rgba(26, 111, 232, 0.10);
-}
-.note-input::placeholder { color: var(--text-muted); font-size: 14px; }
-
-/* Format toolbar — hidden by default, toggleable */
-.format-toolbar {
+/* Format sub-bar — slides in when Aa toggled */
+.format-sub-bar {
   display: flex;
   gap: var(--space-1);
-  padding: var(--space-2) 0 0;
+  padding: 4px var(--space-4) 6px;
+  background: var(--md-sys-color-surface);
+  flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.format-toolbar.hidden { display: none; }
-.format-toolbar::-webkit-scrollbar { display: none; }
-
-.fmt-btn {
+.format-sub-bar.hidden { display: none; }
+.format-sub-bar::-webkit-scrollbar { display: none; }
+.fmt-chip {
   background: var(--md-sys-color-surface-container);
   border: none;
   border-radius: var(--md-sys-shape-full);
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   padding: 5px 12px;
-  min-height: 32px;
+  min-height: 30px;
+  white-space: nowrap;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
-.fmt-btn:active {
+.fmt-chip:active {
   background: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-primary);
 }
 
+/* Zone 2: Input Row — textarea is the HERO, full width */
+.input-row {
+  padding: 0 var(--space-4) var(--space-2);
+  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
+  background: var(--md-sys-color-surface);
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+.note-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1.5px solid var(--md-sys-color-outline-variant);
+  border-radius: 20px;
+  font-size: 16px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--md-sys-color-surface-container-lowest);
+  outline: none;
+  resize: none;
+  min-height: 80px;
+  max-height: 160px;
+  line-height: 1.5;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.note-input:focus {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px rgba(26, 111, 232, 0.10);
+  background: var(--md-sys-color-surface);
+}
+.note-input::placeholder { color: var(--text-muted); }
+
 /* Send button with animated appear/disappear */
 .send-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   border: none;
   border-radius: 50%;

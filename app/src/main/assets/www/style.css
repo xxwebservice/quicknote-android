@@ -597,44 +597,42 @@ header {
   white-space: pre-wrap;
 }
 
-/* Image notes */
+/* Image notes — compact thumbnail, tap to open */
 .note-image {
   flex: 1;
   min-width: 0;
 }
 .note-image img {
-  max-width: 100%;
-  max-height: 200px;
-  border-radius: var(--md-sys-shape-small);
+  max-width: 160px;
+  max-height: 120px;
+  border-radius: var(--md-sys-shape-medium);
   object-fit: cover;
   display: block;
   cursor: pointer;
+  transition: opacity 0.15s;
 }
-.note-image img:active { opacity: 0.85; }
+.note-image img:active { opacity: 0.7; }
 .note-img-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 4px;
 }
 .img-action-btn {
   background: none;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-small);
-  padding: 4px 12px;
-  font-size: 12px;
-  color: var(--accent);
+  border: none;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--md-sys-color-outline);
   cursor: pointer;
   touch-action: manipulation;
-  transition: background 0.15s;
 }
-.img-action-btn:active { background: var(--md-sys-color-primary-container); }
+.img-action-btn:active { color: var(--md-sys-color-primary); }
 .review-note-image img {
-  max-width: 100%;
-  max-height: 240px;
-  border-radius: var(--md-sys-shape-small);
+  max-width: 200px;
+  max-height: 160px;
+  border-radius: var(--md-sys-shape-medium);
   object-fit: cover;
   display: block;
-  margin-top: 4px;
 }
 .note-text strong { font-weight: 600; }
 .note-text .note-bullet { color: var(--accent); margin-right: 4px; }
@@ -643,17 +641,87 @@ header {
 .note-text .note-action::before { content: '\2610 '; color: var(--accent); }
 .note-text .note-highlight { background: #E8F0FE; padding: 0 3px; border-radius: 2px; }
 
-/* Format toolbar — pill chip style, no borders, tonal background */
-.format-toolbar {
-  display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-4);
+/* Input row — compact, camera-first layout */
+.input-row {
+  padding: var(--space-2) var(--space-3);
+  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
   background: var(--bg);
   flex-shrink: 0;
   border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+/* Main input line: [camera] [gallery] [Aa] [____input____] [send] */
+.input-main {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+.input-actions-left {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+  padding-bottom: 4px;
+}
+.input-icon-btn {
+  background: none;
+  border: none;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 18px;
+  padding: 6px;
+  min-width: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--md-sys-shape-full);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.input-icon-btn:active { background: var(--md-sys-color-surface-container); }
+#fmt-toggle-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--md-sys-color-outline);
+}
+#fmt-toggle-btn.active {
+  color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
+}
+
+.note-input {
+  flex: 1;
+  padding: 10px var(--space-4);
+  border: 1.5px solid var(--md-sys-color-outline-variant);
+  border-radius: 22px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--md-sys-color-surface-container-lowest);
+  outline: none;
+  resize: none;
+  max-height: 120px;
+  min-height: 40px;
+  line-height: 1.4;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.note-input:focus {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px rgba(26, 111, 232, 0.10);
+}
+.note-input::placeholder { color: var(--text-muted); font-size: 14px; }
+
+/* Format toolbar — hidden by default, toggleable */
+.format-toolbar {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) 0 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
+.format-toolbar.hidden { display: none; }
 .format-toolbar::-webkit-scrollbar { display: none; }
 
 .fmt-btn {
@@ -661,66 +729,25 @@ header {
   border: none;
   border-radius: var(--md-sys-shape-full);
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 6px 14px;
-  min-height: 36px;
-  min-width: 36px;
+  padding: 5px 12px;
+  min-height: 32px;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
-.fmt-btn:active,
-.fmt-btn.active {
+.fmt-btn:active {
   background: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-primary);
 }
-.fmt-sep {
-  width: 1px;
-  height: 20px;
-  background: var(--md-sys-color-outline-variant);
-  margin: 0 4px;
-  flex-shrink: 0;
-  align-self: center;
-}
-
-/* Input area — chat-bubble style, 24px border-radius */
-.input-row {
-  padding: var(--space-2) var(--space-4) 10px;
-  padding-bottom: calc(12px + var(--safe-bottom));
-  background: var(--bg);
-  flex-shrink: 0;
-}
-.input-group { display: flex; gap: var(--space-2); align-items: flex-end; }
-.note-input {
-  flex: 1;
-  padding: var(--space-3) var(--space-4);
-  border: 1.5px solid var(--md-sys-color-outline-variant);
-  border-radius: 24px;
-  font-size: 15px;
-  font-family: inherit;
-  color: var(--text);
-  background: var(--md-sys-color-surface-container-lowest);
-  outline: none;
-  resize: none;
-  max-height: 160px;
-  min-height: 48px;
-  line-height: 1.5;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-}
-.note-input:focus {
-  border-color: var(--md-sys-color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 111, 232, 0.12);
-  background: var(--md-sys-color-surface);
-}
-.note-input::placeholder { color: var(--text-muted); }
 
 /* Send button with animated appear/disappear */
 .send-btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   border: none;
   border-radius: 50%;

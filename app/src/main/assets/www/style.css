@@ -857,19 +857,72 @@ header {
   word-break: break-word;
 }
 
-/* Bottom fixed action bar — pill buttons */
-.review-action-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  padding-bottom: calc(var(--space-4) + var(--safe-bottom));
+/* Review bottom panel */
+.review-bottom {
+  flex-shrink: 0;
   border-top: 1px solid var(--md-sys-color-outline-variant);
   background: var(--md-sys-color-surface);
-  flex-shrink: 0;
+  padding: var(--space-3) var(--space-5);
+  padding-bottom: calc(var(--space-3) + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
 }
+.review-action-row {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+.review-action-row.secondary {
+  margin-top: 0;
+}
+.review-btn {
+  flex: 1;
+  padding: var(--space-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--md-sys-shape-full);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+  letter-spacing: 0.01em;
+  text-align: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+  touch-action: manipulation;
+}
+.review-btn.primary {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border-color: var(--md-sys-color-primary);
+  box-shadow: var(--md-sys-elevation-1);
+}
+.review-btn.primary:active { transform: scale(0.97); box-shadow: none; }
+.review-btn.outlined {
+  background: transparent;
+  color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-outline-variant);
+}
+.review-btn.outlined:active { background: var(--md-sys-color-surface-container); }
+.review-btn.subtle {
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
+  border-color: transparent;
+  font-size: 13px;
+}
+.review-btn.subtle:active { background: var(--md-sys-color-surface-container); }
+.review-new-link {
+  background: none;
+  border: none;
+  color: var(--md-sys-color-outline);
+  font-size: 13px;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-4);
+  transition: color 0.15s;
+}
+.review-new-link:active { color: var(--md-sys-color-primary); }
 
-/* Pill-shaped action buttons — consistent 16px padding, 9999px radius */
+/* Keep .action-btn for other screens (settings, transcription) */
 .action-btn {
   flex: 1;
   padding: var(--space-4);
@@ -911,23 +964,7 @@ header {
   opacity: 0.85;
 }
 
-.review-footer {
-  text-align: center;
-  padding: var(--space-2) var(--space-4);
-  flex-shrink: 0;
-}
-.new-record-link {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--md-sys-shape-small);
-  transition: background 0.15s;
-}
-.new-record-link:active { background: var(--md-sys-color-primary-container); }
+/* (review-footer removed — now in .review-bottom) */
 
 .export-hint {
   text-align: center;

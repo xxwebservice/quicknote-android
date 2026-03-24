@@ -418,13 +418,18 @@
 
   function saveActiveSession() {
     if (!currentSession) return;
-    // Save full session (strip imageDataUrl to avoid quota)
     const toSave = {
       ...currentSession,
       duration: recordingStartTime ? Date.now() - recordingStartTime : currentSession.duration,
       notes: currentSession.notes.map(n => { const { imageDataUrl, ...rest } = n; return rest; }),
     };
-    try { localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(toSave)); } catch(e) { console.warn('autosave:', e); }
+    const json = JSON.stringify(toSave);
+    // Write to localStorage (fast but may be lost on crash)
+    try { localStorage.setItem(ACTIVE_SESSION_KEY, json); } catch(e) {}
+    // Also write to native filesystem (survives WebView crash/kill)
+    if (isNative) {
+      try { NativeBridge.saveText('_active_session.json', json); } catch(e) {}
+    }
   }
 
   function saveActiveState(recording) {
@@ -440,12 +445,17 @@
   function clearActiveSession() {
     localStorage.removeItem(ACTIVE_SESSION_KEY);
     localStorage.removeItem(ACTIVE_STATE_KEY);
+    if (isNative) { try { NativeBridge.saveText('_active_session.json', ''); } catch(e) {} }
   }
 
   function checkForRecovery() {
-    const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+    let saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+    // If localStorage was wiped (crash/kill), try native filesystem fallback
+    if (!saved && isNative) {
+      try { saved = NativeBridge.readText('_active_session.json'); } catch(e) {}
+    }
     const state = localStorage.getItem(ACTIVE_STATE_KEY);
-    if (!saved) return;
+    if (!saved || saved.length < 10) return;
     try {
       const session = JSON.parse(saved);
       const st = state ? JSON.parse(state) : {};

@@ -196,6 +196,22 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String readText(String filename) {
+            try {
+                File dir = getExternalFilesDir("QuickNote");
+                File file = new File(dir, filename);
+                if (!file.exists() || file.length() < 2) return "";
+                FileInputStream fis = new FileInputStream(file);
+                byte[] data = new byte[(int) file.length()];
+                fis.read(data);
+                fis.close();
+                return new String(data, "UTF-8");
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        @JavascriptInterface
         public boolean fileExists(String filename) {
             File dir = getExternalFilesDir("QuickNote");
             return new File(dir, filename).exists();

@@ -1597,9 +1597,17 @@
       autoResize();
       dom.sendBtn.disabled = !dom.noteInput.value.trim();
     });
+    // Shift+Enter or Ctrl+Enter = send note (works with bluetooth keyboards)
+    // Track shift state manually for bluetooth keyboard compat
+    let shiftHeld = false;
+    document.addEventListener('keydown', e => { if (e.key === 'Shift' || e.keyCode === 16) shiftHeld = true; });
+    document.addEventListener('keyup', e => { if (e.key === 'Shift' || e.keyCode === 16) shiftHeld = false; });
     dom.noteInput.addEventListener('keydown', e => {
       const isEnter = e.key === 'Enter' || e.keyCode === 13;
-      if (isEnter && e.shiftKey) { e.preventDefault(); addNote(dom.noteInput.value); }
+      if (isEnter && (e.shiftKey || e.ctrlKey || e.metaKey || shiftHeld)) {
+        e.preventDefault();
+        addNote(dom.noteInput.value);
+      }
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 

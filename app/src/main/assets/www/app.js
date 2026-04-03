@@ -1607,17 +1607,31 @@
       autoResize();
       dom.sendBtn.disabled = !dom.noteInput.value.trim();
     });
-    // Shift+Enter or Ctrl+Enter = send note (works with bluetooth keyboards)
-    // Track shift state manually for bluetooth keyboard compat
-    let shiftHeld = false;
-    document.addEventListener('keydown', e => { if (e.key === 'Shift' || e.keyCode === 16) shiftHeld = true; });
-    document.addEventListener('keyup', e => { if (e.key === 'Shift' || e.keyCode === 16) shiftHeld = false; });
+    // Send note: Ctrl+Enter (primary) or double-Enter within 400ms (fallback for BT keyboards)
+    let lastEnterTime = 0;
     dom.noteInput.addEventListener('keydown', e => {
       const isEnter = e.key === 'Enter' || e.keyCode === 13;
-      if (isEnter && (e.shiftKey || e.ctrlKey || e.metaKey || shiftHeld)) {
+      if (!isEnter) return;
+      // Ctrl/Cmd/Shift+Enter = send immediately
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
         e.preventDefault();
         addNote(dom.noteInput.value);
+        lastEnterTime = 0;
+        return;
       }
+      // Double-Enter = send (press Enter twice within 400ms)
+      const now = Date.now();
+      if (now - lastEnterTime < 400) {
+        e.preventDefault();
+        // Remove the newline from the first Enter press
+        const val = dom.noteInput.value;
+        if (val.endsWith('\n')) dom.noteInput.value = val.slice(0, -1);
+        addNote(dom.noteInput.value);
+        lastEnterTime = 0;
+        return;
+      }
+      lastEnterTime = now;
+      // Normal Enter = newline (default behavior)
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 

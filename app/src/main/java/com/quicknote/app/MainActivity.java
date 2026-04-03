@@ -159,6 +159,11 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public boolean saveText(String filename, String text) {
+            return saveTextSilent(filename, text);
+        }
+
+        /** Write text file without any Toast notification */
+        public boolean saveTextSilent(String filename, String text) {
             try {
                 File dir = getExternalFilesDir("QuickNote");
                 if (dir != null && !dir.exists()) dir.mkdirs();
@@ -166,9 +171,6 @@ public class MainActivity extends Activity {
                 FileOutputStream fos = new FileOutputStream(file);
                 fos.write(text.getBytes("UTF-8"));
                 fos.close();
-                runOnUiThread(() ->
-                    Toast.makeText(MainActivity.this, "已保存: " + filename, Toast.LENGTH_SHORT).show()
-                );
                 return true;
             } catch (IOException e) {
                 e.printStackTrace();

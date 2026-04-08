@@ -171,6 +171,13 @@
     return `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
   }
   function formatTimestamp(ms) {
+    // Guard: if ms is unreasonably large (>24 hours), it's likely a bug
+    // (e.g. Date.now() - 0 when recordingStartTime was lost)
+    // Show as HH:MM clock time instead
+    if (ms > 86400000) {
+      const d = new Date(ms + (recordingStartTime || 0));
+      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
     const s = Math.floor(ms / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2,'0')}`;
   }
@@ -665,7 +672,7 @@
   // --- Notes ---
   function addImageNote(file) {
     if (!currentSession || !file) return;
-    const timestamp = Date.now() - recordingStartTime;
+    const timestamp = recordingStartTime ? Date.now() - recordingStartTime : (currentSession.duration || 0);
     const imgFilename = `${currentSession.id}_img_${Date.now()}.jpg`;
 
     // Read file, compress, save
@@ -729,7 +736,8 @@
 
   function addNote(text) {
     if (!text.trim() || !currentSession) return;
-    const note = { timestamp: Date.now() - recordingStartTime, text: text.trim(), createdAt: Date.now() };
+    const elapsed = recordingStartTime ? Date.now() - recordingStartTime : (currentSession.duration || 0);
+    const note = { timestamp: elapsed, text: text.trim(), createdAt: Date.now() };
     currentSession.notes.push(note);
     dom.emptyHint.classList.add('hidden');
     renderNoteEntry(note);
@@ -1682,7 +1690,7 @@
           delete window[cb];
           if (result && result.filename) {
             const note = {
-              timestamp: Date.now() - recordingStartTime,
+              timestamp: recordingStartTime ? Date.now() - recordingStartTime : (currentSession ? currentSession.duration || 0 : 0),
               text: `![${result.filename}]`,
               type: 'image',
               imageFile: result.filename,

@@ -1579,7 +1579,7 @@
 
   function autoResize() {
     const el = dom.noteInput;
-    el.style.height = '80px'; // reset to default 3-line height
+    el.style.height = '44px'; // reset to single line
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }
 

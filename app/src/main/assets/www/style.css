@@ -740,7 +740,7 @@ header {
   background: var(--md-sys-color-surface-container-lowest);
   outline: none;
   resize: none;
-  min-height: 80px;
+  min-height: 44px;
   max-height: 160px;
   line-height: 1.5;
   overflow-y: auto;

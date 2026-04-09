@@ -1617,12 +1617,16 @@
     });
     // Send note: Ctrl+Enter (primary) or double-Enter within 400ms (fallback for BT keyboards)
     let lastEnterTime = 0;
-    dom.noteInput.addEventListener('keydown', e => {
-      const isEnter = e.key === 'Enter' || e.keyCode === 13;
+    // Capture Enter at document level — more reliable with BT keyboards
+    document.addEventListener('keydown', e => {
+      // Only act when noteInput is focused
+      if (document.activeElement !== dom.noteInput) return;
+      const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
       if (!isEnter) return;
       // Ctrl/Cmd/Shift+Enter = send immediately
       if (e.ctrlKey || e.metaKey || e.shiftKey) {
         e.preventDefault();
+        e.stopPropagation();
         addNote(dom.noteInput.value);
         lastEnterTime = 0;
         return;

@@ -1610,40 +1610,39 @@
       navigateTo('history-screen');
     });
 
-    // Note input
+    // Note input — send detection via TEXT CONTENT (not keydown)
+    // This works with ANY keyboard including BT keyboards that don't report modifier keys
+    let lastNewlineTime = 0;
     dom.noteInput.addEventListener('input', () => {
+      const val = dom.noteInput.value;
+      // Detect double-Enter: two newlines at end within 500ms
+      if (val.endsWith('\n')) {
+        const now = Date.now();
+        if (now - lastNewlineTime < 500) {
+          // Double-Enter detected — strip trailing newlines and send
+          dom.noteInput.value = val.replace(/\n+$/, '');
+          if (dom.noteInput.value.trim()) {
+            addNote(dom.noteInput.value);
+          }
+          lastNewlineTime = 0;
+          autoResize();
+          return;
+        }
+        lastNewlineTime = now;
+      } else {
+        lastNewlineTime = 0;
+      }
       autoResize();
-      dom.sendBtn.disabled = !dom.noteInput.value.trim();
+      dom.sendBtn.disabled = !val.trim();
     });
-    // Send note: Ctrl+Enter (primary) or double-Enter within 400ms (fallback for BT keyboards)
-    let lastEnterTime = 0;
-    // Capture Enter at document level — more reliable with BT keyboards
+    // Ctrl/Cmd+Enter via keydown (bonus for keyboards that support it)
     document.addEventListener('keydown', e => {
-      // Only act when noteInput is focused
       if (document.activeElement !== dom.noteInput) return;
-      const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
-      if (!isEnter) return;
-      // Ctrl/Cmd/Shift+Enter = send immediately
-      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      const isEnter = e.key === 'Enter' || e.keyCode === 13;
+      if (isEnter && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        e.stopPropagation();
         addNote(dom.noteInput.value);
-        lastEnterTime = 0;
-        return;
       }
-      // Double-Enter = send (press Enter twice within 400ms)
-      const now = Date.now();
-      if (now - lastEnterTime < 400) {
-        e.preventDefault();
-        // Remove the newline from the first Enter press
-        const val = dom.noteInput.value;
-        if (val.endsWith('\n')) dom.noteInput.value = val.slice(0, -1);
-        addNote(dom.noteInput.value);
-        lastEnterTime = 0;
-        return;
-      }
-      lastEnterTime = now;
-      // Normal Enter = newline (default behavior)
     });
     dom.sendBtn.addEventListener('click', () => addNote(dom.noteInput.value));
 

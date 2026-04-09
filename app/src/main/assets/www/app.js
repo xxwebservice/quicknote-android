@@ -1618,7 +1618,7 @@
       // Detect double-Enter: two newlines at end within 500ms
       if (val.endsWith('\n')) {
         const now = Date.now();
-        if (now - lastNewlineTime < 500) {
+        if (now - lastNewlineTime < 250) {
           // Double-Enter detected — strip trailing newlines and send
           dom.noteInput.value = val.replace(/\n+$/, '');
           if (dom.noteInput.value.trim()) {
@@ -1635,7 +1635,18 @@
       autoResize();
       dom.sendBtn.disabled = !val.trim();
     });
-    // Ctrl/Cmd+Enter via keydown (bonus for keyboards that support it)
+    // Shift/Ctrl+Enter via keyup — fires AFTER IME processes the key,
+    // so modifier state is more likely correct on BT keyboards
+    dom.noteInput.addEventListener('keyup', e => {
+      const isEnter = e.key === 'Enter' || e.keyCode === 13;
+      if (isEnter && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+        // Undo the newline that was already inserted by default keydown
+        const val = dom.noteInput.value;
+        dom.noteInput.value = val.replace(/\n+$/, '');
+        if (dom.noteInput.value.trim()) addNote(dom.noteInput.value);
+      }
+    });
+    // Also try keydown (works on desktop/USB keyboards)
     document.addEventListener('keydown', e => {
       if (document.activeElement !== dom.noteInput) return;
       const isEnter = e.key === 'Enter' || e.keyCode === 13;

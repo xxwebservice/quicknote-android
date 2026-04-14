@@ -214,29 +214,8 @@
             </div>
           </div>
 
-          <p class="section-title" style="margin-top:24px;margin-bottom:8px">语音转录</p>
-          <p class="settings-hint">填入API Key即可使用云端转录（推荐Groq，免费且极快）。无需下载模型。</p>
-          <div class="settings-group" style="margin-top:12px">
-            <div class="settings-item ripple-target">
-              <div class="settings-item-label">
-                <span>转录服务</span>
-              </div>
-              <select id="setting-transcribe-provider" class="settings-select">
-                <option value="groq">Groq (免费)</option>
-                <option value="openai">OpenAI</option>
-              </select>
-            </div>
-            <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:8px">
-              <div class="settings-item-label">
-                <span>API Key</span>
-                <span class="settings-hint-text">Groq: groq.com 免费注册获取</span>
-              </div>
-              <input type="password" id="setting-api-key" class="settings-input" placeholder="gsk_..." autocomplete="off">
-            </div>
-          </div>
-
-          <p class="section-title" style="margin-top:24px;margin-bottom:8px">本地转录模型（备选）</p>
-          <p class="settings-hint">仅在无网络时使用。已知部分机型不兼容。</p>
+          <p class="section-title" style="margin-top:24px;margin-bottom:8px">本地转录模型</p>
+          <p class="settings-hint">数据严格本地存储，不上传任何云端。模型一次下载，离线使用。</p>
           <div id="settings-model-list" style="margin-top:12px"></div>
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">数据管理</p>
@@ -269,7 +248,7 @@
             <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>QuickNote</span>
-                <span class="settings-hint-text" id="version-display">v4.4</span>
+                <span class="settings-hint-text" id="version-display">v4.5</span>
               </div>
             </div>
             <div class="settings-item ripple-target">

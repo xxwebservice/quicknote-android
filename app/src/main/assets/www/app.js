@@ -122,6 +122,7 @@
     autoStop: '0',
     exportFormat: 'zip',
     stealthMode: 'off',
+    splitMode: 'off',
   };
 
   function loadSettings() {
@@ -144,6 +145,8 @@
     if (dom.settingExportFormat) dom.settingExportFormat.value = s.exportFormat;
     const stealthSel = $('#setting-stealth-mode');
     if (stealthSel) stealthSel.value = s.stealthMode || 'off';
+    const splitSel = $('#setting-split-mode');
+    if (splitSel) splitSel.value = s.splitMode || 'off';
     // Storage path
     if (dom.storagePathDisplay) {
       if (isNative && typeof NativeBridge.getStoragePath === 'function') {
@@ -156,11 +159,13 @@
 
   function onSettingChange() {
     const stealthSel = $('#setting-stealth-mode');
+    const splitSel = $('#setting-split-mode');
     const settings = {
       audioQuality: dom.settingAudioQuality?.value || '44100',
       autoStop: dom.settingAutoStop?.value || '0',
       exportFormat: dom.settingExportFormat?.value || 'zip',
       stealthMode: stealthSel?.value || 'off',
+      splitMode: splitSel?.value || 'off',
     };
     saveSettings(settings);
   }
@@ -933,24 +938,37 @@
       instructions: ['1. 将录音转为完整transcript','2. 与笔记按时间戳对齐','3. 笔记是重点，transcript是上下文','4. 图片附件（白板/幻灯片等）请描述关键内容并融入纪要','输出: 会议纪要 + 重点标注 + 笔记未记但重要的内容 + 图片内容解读']
     }, null, 2);
     if (isNative) {
-      // Use new method with image filenames
       const imageList = imageFiles.join(',');
+      const settings = loadSettings();
+      const splitMode = settings.splitMode === 'on';
       const result = await new Promise((resolve, reject) => {
         const cb = 'qnZip' + Date.now();
         window[cb] = (resp) => {
           delete window[cb];
-          if (typeof resp === 'object' && resp.parts) {
-            // Split ZIP response
-            resolve({ size: resp.size, parts: resp.parts });
+          if (typeof resp === 'object' && resp.split) {
+            // Split mode: notes ZIP + standalone audio file
+            resolve({ size: resp.size, split: true, notesFile: resp.notesFile, audioFile: resp.audioFile });
           } else if (typeof resp === 'number' && resp > 0) {
-            resolve({ size: resp, parts: 1 });
+            resolve({ size: resp, split: false });
           } else {
             reject(new Error('ZIP build failed'));
           }
         };
-        NativeBridge.buildZipAndSaveWithImages(md, analysis, session.nativeAudioFile || '', session.transcription || '', imageList, zipFilename, cb);
+        // Use V2 if available (supports splitMode), else fall back
+        if (typeof NativeBridge.buildZipAndSaveWithImagesV2 === 'function') {
+          NativeBridge.buildZipAndSaveWithImagesV2(md, analysis, session.nativeAudioFile || '', session.transcription || '', imageList, zipFilename, splitMode, cb);
+        } else {
+          NativeBridge.buildZipAndSaveWithImages(md, analysis, session.nativeAudioFile || '', session.transcription || '', imageList, zipFilename, cb);
+        }
       });
-      return { zipFilename, fileSize: result.size, parts: result.parts, native: true };
+      return {
+        zipFilename,
+        fileSize: result.size,
+        split: result.split,
+        notesFile: result.notesFile,
+        audioFile: result.audioFile,
+        native: true,
+      };
     }
     const enc = new TextEncoder();
     const files = [
@@ -1010,12 +1028,11 @@
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
-        if (result.parts > 1) {
-          showToast(`文件已分为 ${result.parts} 份 (每份≤95MB)`, 3000);
-          for (let i = 1; i <= result.parts; i++) {
-            const partName = result.zipFilename.replace('.zip', `_part${i}.zip`);
-            await saveExportRecord(currentSession, partName, 0);
-          }
+        if (result.split) {
+          // Split mode: save both files in exports list
+          await saveExportRecord(currentSession, result.notesFile, 0);
+          await saveExportRecord(currentSession, result.audioFile, 0);
+          showToast(`已保存 2 个文件：\n· ${result.notesFile}（笔记+图片）\n· ${result.audioFile}（录音）`, 5000);
         } else {
           await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
           showToast('已保存: ' + result.zipFilename);
@@ -1061,14 +1078,12 @@
       const result = await buildSessionZip(currentSession);
       document.querySelector('.toast')?.remove();
       if (result.native) {
-        if (result.parts > 1) {
-          for (let i = 1; i <= result.parts; i++) {
-            const partName = result.zipFilename.replace('.zip', `_part${i}.zip`);
-            await saveExportRecord(currentSession, partName, 0);
-            showToast(`分享第 ${i}/${result.parts} 份...`, 5000);
-            NativeBridge.shareFile(partName);
-            if (i < result.parts) await new Promise(r => setTimeout(r, 2000));
-          }
+        if (result.split) {
+          // Save both records
+          await saveExportRecord(currentSession, result.notesFile, 0);
+          await saveExportRecord(currentSession, result.audioFile, 0);
+          // Show choice dialog: which to share first
+          await shareSplitFiles(result.notesFile, result.audioFile);
           return;
         }
         await saveExportRecord(currentSession, result.zipFilename, result.fileSize);
@@ -1089,6 +1104,28 @@
       document.querySelector('.toast')?.remove();
       if (e.name !== 'AbortError') showToast('\u64CD\u4F5C\u5931\u8D25: ' + e.message);
     }
+  }
+
+  /** Share split files sequentially with user-friendly UX */
+  async function shareSplitFiles(notesFile, audioFile) {
+    if (!isNative) return;
+    // Step 1: Share notes ZIP
+    showToast('共 2 个文件，先分享笔记…', 3000);
+    NativeBridge.shareFile(notesFile);
+    // Wait for user to return from share sheet, then prompt for audio
+    setTimeout(() => {
+      const ok = confirm(
+        '笔记已发送。\n\n' +
+        '现在分享录音文件 (' + audioFile + ') 吗？\n\n' +
+        '点确定 → 立即分享录音\n' +
+        '点取消 → 稍后从「已导出文件」中分享'
+      );
+      if (ok) {
+        NativeBridge.shareFile(audioFile);
+      } else {
+        showToast('录音文件已保存到「已导出文件」', 3000);
+      }
+    }, 1500);
   }
 
   async function saveExportRecord(session, filename, fileSize) {
@@ -1778,6 +1815,7 @@
     dom.settingAutoStop?.addEventListener('change', onSettingChange);
     dom.settingExportFormat?.addEventListener('change', onSettingChange);
     $('#setting-stealth-mode')?.addEventListener('change', onSettingChange);
+    $('#setting-split-mode')?.addEventListener('change', onSettingChange);
 
     // == Settings model list: event delegation -- registered ONCE here ==
     // Handles ALL download/delete for both Whisper and Diarization models

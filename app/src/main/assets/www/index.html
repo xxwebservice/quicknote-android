@@ -243,8 +243,8 @@
           <div class="settings-group">
             <div class="settings-item ripple-target">
               <div class="settings-item-label">
-                <span>备份全部数据</span>
-                <span class="settings-hint-text">会议记录、设置、笔记全部导出到本地</span>
+                <span>备份元数据 (JSON)</span>
+                <span class="settings-hint-text">会议列表 + 笔记 + 设置（不含录音/图片）</span>
               </div>
               <button id="backup-btn" class="settings-action-btn ripple-target">备份</button>
             </div>
@@ -255,6 +255,13 @@
               </div>
               <button id="restore-btn" class="settings-action-btn ripple-target">恢复</button>
             </div>
+            <div class="settings-item ripple-target">
+              <div class="settings-item-label">
+                <span>批量导出全部会议</span>
+                <span class="settings-hint-text">逐个生成完整 ZIP（含录音和图片），保存到本地</span>
+              </div>
+              <button id="export-all-btn" class="settings-action-btn ripple-target">导出</button>
+            </div>
           </div>
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">关于</p>
@@ -262,7 +269,7 @@
             <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>QuickNote</span>
-                <span class="settings-hint-text" id="version-display">v4.3</span>
+                <span class="settings-hint-text" id="version-display">v4.4</span>
               </div>
             </div>
             <div class="settings-item ripple-target">

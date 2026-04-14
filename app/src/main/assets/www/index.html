@@ -192,6 +192,16 @@
                 <option value="on">开启</option>
               </select>
             </div>
+            <div class="settings-item ripple-target">
+              <div class="settings-item-label">
+                <span>大文件拆分</span>
+                <span class="settings-hint-text">超过 80MB 时，录音单独保存（适配企微等 100MB 限制）</span>
+              </div>
+              <select id="setting-split-mode" class="settings-select">
+                <option value="off">关闭（单个 ZIP）</option>
+                <option value="on">开启（拆分录音）</option>
+              </select>
+            </div>
           </div>
 
           <p class="section-title" style="margin-top:24px;margin-bottom:8px">存储</p>
@@ -252,7 +262,7 @@
             <div class="settings-item ripple-target">
               <div class="settings-item-label">
                 <span>QuickNote</span>
-                <span class="settings-hint-text" id="version-display">v4.2</span>
+                <span class="settings-hint-text" id="version-display">v4.3</span>
               </div>
             </div>
             <div class="settings-item ripple-target">

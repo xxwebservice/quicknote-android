@@ -2078,6 +2078,46 @@
       } catch(e) { showToast('备份文件格式错误: ' + e.message); }
     });
 
+    // Batch export all sessions — for safety before upgrading
+    $('#export-all-btn')?.addEventListener('click', async () => {
+      if (!sessions.length) { showToast('没有会议记录'); return; }
+      const total = sessions.length;
+      if (!confirm(`将逐个生成 ${total} 个会议的完整 ZIP（含录音和图片），这可能需要几分钟。继续？`)) return;
+
+      let success = 0, failed = 0;
+      const savedCurrent = currentSession;
+      try {
+        for (let i = 0; i < sessions.length; i++) {
+          const s = sessions[i];
+          showToast(`正在导出 ${i + 1}/${total}: ${s.title || '未命名'}`, 60000);
+          // Temporarily set as currentSession so buildSessionZip works
+          currentSession = s;
+          try {
+            const result = await buildSessionZip(s);
+            if (result && (result.zipFilename || result.notesFile)) {
+              if (result.split) {
+                await saveExportRecord(s, result.notesFile, 0);
+                await saveExportRecord(s, result.audioFile, 0);
+              } else {
+                await saveExportRecord(s, result.zipFilename, result.fileSize || 0);
+              }
+              success++;
+            } else {
+              failed++;
+            }
+          } catch (e) {
+            console.error('Batch export failed for', s.title, e);
+            failed++;
+          }
+        }
+      } finally {
+        currentSession = savedCurrent;
+      }
+      document.querySelector('.toast')?.remove();
+      const path = isNative ? NativeBridge.getStoragePath() : '本地';
+      alert(`批量导出完成\n\n成功: ${success}\n失败: ${failed}\n\n所有 ZIP 已保存到:\n${path}\n\n可在「已导出文件」中查看和分享。`);
+    });
+
     // Debug info button
     $('#debug-info-btn')?.addEventListener('click', () => {
       let info = '浏览器模式';

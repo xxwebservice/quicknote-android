@@ -340,16 +340,109 @@ public class MainActivity extends Activity {
         public void buildZipAndSaveWithImages(String notesMd, String claudeJson,
                                      String audioFilename, String transcriptText,
                                      String imageFilenames, String zipFilename, String callbackFn) {
+            // Default: no split (single ZIP)
+            buildZipAndSaveWithImagesV2(notesMd, claudeJson, audioFilename, transcriptText, imageFilenames, zipFilename, false, callbackFn);
+        }
+
+        /**
+         * V2: includes splitMode parameter.
+         * splitMode = false → always single ZIP regardless of size
+         * splitMode = true  → if total > 95MB, produce 2 separate files:
+         *   - {prefix}_notes.zip (notes + images + transcript, small, openable)
+         *   - {prefix}_recording.{ext} (raw audio file, large but playable directly)
+         */
+        @JavascriptInterface
+        public void buildZipAndSaveWithImagesV2(String notesMd, String claudeJson,
+                                     String audioFilename, String transcriptText,
+                                     String imageFilenames, String zipFilename,
+                                     boolean splitMode, String callbackFn) {
             new Thread(() -> {
                 try {
                     File dir = getExternalFilesDir("QuickNote");
                     if (dir != null) dir.mkdirs();
-                    File zipFile = new File(dir, zipFilename);
 
                     String prefix = zipFilename.endsWith("_quicknote.zip")
                             ? zipFilename.substring(0, zipFilename.length() - "_quicknote.zip".length())
                             : zipFilename.replace(".zip", "");
 
+                    // Check if split is needed (audio > 80MB)
+                    long audioSize = 0;
+                    File audioFile = null;
+                    String audioExt = "m4a";
+                    if (audioFilename != null && !audioFilename.isEmpty()) {
+                        audioFile = new File(dir, audioFilename);
+                        if (audioFile.exists()) {
+                            audioSize = audioFile.length();
+                            audioExt = audioFilename.endsWith(".m4a") ? "m4a" : "webm";
+                        }
+                    }
+
+                    boolean shouldSplit = splitMode && audioSize > 80L * 1024 * 1024;
+
+                    if (shouldSplit) {
+                        // === SPLIT MODE: notes ZIP + audio file separately ===
+
+                        // Build notes-only ZIP
+                        File notesZip = new File(dir, prefix + "_notes.zip");
+                        ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(notesZip));
+
+                        zos.putNextEntry(new ZipEntry(prefix + "_notes.md"));
+                        zos.write(notesMd.getBytes("UTF-8"));
+                        zos.closeEntry();
+
+                        zos.putNextEntry(new ZipEntry(prefix + "_for_claude.json"));
+                        zos.write(claudeJson.getBytes("UTF-8"));
+                        zos.closeEntry();
+
+                        if (transcriptText != null && !transcriptText.isEmpty()) {
+                            zos.putNextEntry(new ZipEntry(prefix + "_transcript.txt"));
+                            zos.write(transcriptText.getBytes("UTF-8"));
+                            zos.closeEntry();
+                        }
+
+                        if (imageFilenames != null && !imageFilenames.isEmpty()) {
+                            for (String imgName : imageFilenames.split(",")) {
+                                imgName = imgName.trim();
+                                if (imgName.isEmpty()) continue;
+                                File imgFile = new File(dir, imgName);
+                                if (imgFile.exists()) {
+                                    zos.putNextEntry(new ZipEntry("images/" + imgName));
+                                    FileInputStream fis = new FileInputStream(imgFile);
+                                    byte[] buf = new byte[65536];
+                                    int len;
+                                    while ((len = fis.read(buf)) > 0) zos.write(buf, 0, len);
+                                    fis.close();
+                                    zos.closeEntry();
+                                }
+                            }
+                        }
+
+                        zos.close();
+
+                        // Copy audio file as standalone .m4a (already on disk, just rename for clarity)
+                        File standaloneAudio = new File(dir, prefix + "_recording." + audioExt);
+                        if (!standaloneAudio.equals(audioFile)) {
+                            FileInputStream fis = new FileInputStream(audioFile);
+                            FileOutputStream fos = new FileOutputStream(standaloneAudio);
+                            byte[] buf = new byte[65536];
+                            int len;
+                            while ((len = fis.read(buf)) > 0) fos.write(buf, 0, len);
+                            fis.close();
+                            fos.close();
+                        }
+
+                        long notesSize = notesZip.length();
+                        long totalSize = notesSize + audioSize;
+                        final String notesName = notesZip.getName();
+                        final String audioName = standaloneAudio.getName();
+                        final long ts = totalSize;
+                        runOnUiThread(() -> webView.evaluateJavascript(
+                            "window['" + callbackFn + "']({size:" + ts + ",split:true,notesFile:'" + notesName + "',audioFile:'" + audioName + "'})", null));
+                        return;
+                    }
+
+                    // === SINGLE ZIP MODE (no split) ===
+                    File zipFile = new File(dir, zipFilename);
                     ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile));
 
                     zos.putNextEntry(new ZipEntry(prefix + "_notes.md"));
@@ -360,31 +453,24 @@ public class MainActivity extends Activity {
                     zos.write(claudeJson.getBytes("UTF-8"));
                     zos.closeEntry();
 
-                    // Include local transcript when available (Case A)
                     if (transcriptText != null && !transcriptText.isEmpty()) {
                         zos.putNextEntry(new ZipEntry(prefix + "_transcript.txt"));
                         zos.write(transcriptText.getBytes("UTF-8"));
                         zos.closeEntry();
                     }
 
-                    if (audioFilename != null && !audioFilename.isEmpty()) {
-                        File audioFile = new File(dir, audioFilename);
-                        if (audioFile.exists()) {
-                            String ext = audioFilename.endsWith(".m4a") ? "m4a" : "webm";
-                            zos.putNextEntry(new ZipEntry(prefix + "_recording." + ext));
-                            FileInputStream fis = new FileInputStream(audioFile);
-                            byte[] buf = new byte[65536];
-                            int len;
-                            while ((len = fis.read(buf)) > 0) zos.write(buf, 0, len);
-                            fis.close();
-                            zos.closeEntry();
-                        }
+                    if (audioFile != null && audioFile.exists()) {
+                        zos.putNextEntry(new ZipEntry(prefix + "_recording." + audioExt));
+                        FileInputStream fis = new FileInputStream(audioFile);
+                        byte[] buf = new byte[65536];
+                        int len;
+                        while ((len = fis.read(buf)) > 0) zos.write(buf, 0, len);
+                        fis.close();
+                        zos.closeEntry();
                     }
 
-                    // Include images
                     if (imageFilenames != null && !imageFilenames.isEmpty()) {
-                        String[] imgs = imageFilenames.split(",");
-                        for (String imgName : imgs) {
+                        for (String imgName : imageFilenames.split(",")) {
                             imgName = imgName.trim();
                             if (imgName.isEmpty()) continue;
                             File imgFile = new File(dir, imgName);
@@ -402,34 +488,8 @@ public class MainActivity extends Activity {
 
                     zos.close();
                     long size = zipFile.length();
-                    long MAX_PART = 95L * 1024 * 1024; // 95MB per part
-
-                    if (size > MAX_PART) {
-                        // Split into parts
-                        int partCount = (int) Math.ceil((double) size / MAX_PART);
-                        FileInputStream splitIn = new FileInputStream(zipFile);
-                        byte[] buf2 = new byte[65536];
-                        for (int part = 1; part <= partCount; part++) {
-                            String partName = zipFilename.replace(".zip", "_part" + part + ".zip");
-                            File partFile = new File(dir, partName);
-                            FileOutputStream partOut = new FileOutputStream(partFile);
-                            long written = 0;
-                            int len2;
-                            while (written < MAX_PART && (len2 = splitIn.read(buf2)) > 0) {
-                                partOut.write(buf2, 0, len2);
-                                written += len2;
-                            }
-                            partOut.close();
-                        }
-                        splitIn.close();
-                        // Callback with negative size = number of parts
-                        final int pc = partCount;
-                        runOnUiThread(() -> webView.evaluateJavascript(
-                            "window['" + callbackFn + "']({size:" + size + ",parts:" + pc + "})", null));
-                    } else {
-                        runOnUiThread(() -> webView.evaluateJavascript(
-                            "window['" + callbackFn + "'](" + size + ")", null));
-                    }
+                    runOnUiThread(() -> webView.evaluateJavascript(
+                        "window['" + callbackFn + "'](" + size + ")", null));
                 } catch (Exception e) {
                     e.printStackTrace();
                     runOnUiThread(() -> webView.evaluateJavascript(

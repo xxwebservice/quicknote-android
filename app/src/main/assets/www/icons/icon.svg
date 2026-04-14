@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#3b82f6"/>
-  <g transform="translate(128, 96)">
-    <!-- Notepad icon -->
-    <rect x="0" y="0" width="256" height="320" rx="16" fill="white" opacity="0.95"/>
-    <line x1="48" y1="80" x2="208" y2="80" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
-    <line x1="48" y1="130" x2="180" y2="130" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
-    <line x1="48" y1="180" x2="196" y2="180" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
-    <line x1="48" y1="230" x2="160" y2="230" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round"/>
-  </g>
+  <rect width="512" height="512" rx="92" fill="#F5F0E8"/>
+  <path d="M0 0 H512 V82 Q512 92 502 92 H10 Q0 92 0 82 Z" fill="#64646E"/>
+  <circle cx="128" cy="46" r="13" fill="#DCDCE6"/>
+  <circle cx="384" cy="46" r="13" fill="#DCDCE6"/>
+  <line x1="92" y1="184" x2="430" y2="184" stroke="#B4AFA5" stroke-width="6" stroke-linecap="round"/>
+  <line x1="92" y1="252" x2="402" y2="252" stroke="#B4AFA5" stroke-width="6" stroke-linecap="round"/>
+  <line x1="92" y1="320" x2="420" y2="320" stroke="#B4AFA5" stroke-width="6" stroke-linecap="round"/>
+  <line x1="92" y1="388" x2="312" y2="388" stroke="#B4AFA5" stroke-width="6" stroke-linecap="round"/>
 </svg>
